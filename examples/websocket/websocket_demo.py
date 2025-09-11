@@ -7,6 +7,7 @@ import traceback
 import multiaddr
 import trio
 
+from libp2p import new_host
 from libp2p.abc import INotifee
 from libp2p.crypto.ed25519 import create_new_key_pair as create_ed25519_key_pair
 from libp2p.crypto.secp256k1 import create_new_key_pair
@@ -25,8 +26,10 @@ from libp2p.stream_muxer.yamux.yamux import Yamux
 from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.transport.websocket.transport import WebsocketTransport
 
-# Enable debug logging
-logging.basicConfig(level=logging.DEBUG)
+# Enable structured logging
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 
 logger = logging.getLogger("libp2p.websocket-example")
 
@@ -59,7 +62,25 @@ async def echo_handler(stream):
 
 
 def create_websocket_host(listen_addrs=None, use_plaintext=False):
-    """Create a host with WebSocket transport."""
+    """
+    Create a host with WebSocket transport
+    using the simplified new_host() function.
+    """
+    if listen_addrs is None:
+        listen_addrs = [multiaddr.Multiaddr("/ip4/0.0.0.0/tcp/0/ws")]
+
+    # Use the simplified new_host() function which automatically handles
+    # WebSocket transport when WebSocket multiaddrs are provided
+    host = new_host(listen_addrs=listen_addrs)
+
+    logger.info(f"Created WebSocket host with addresses: {listen_addrs}")
+    logger.info(f"Security mode: {'Plaintext' if use_plaintext else 'Noise (default)'}")
+
+    return host
+
+
+def create_websocket_host_manual(listen_addrs=None, use_plaintext=False):
+    """Create a host with WebSocket transport using manual configuration (legacy)."""
     # Create key pair and peer store
     key_pair = create_new_key_pair()
     peer_id = ID.from_pubkey(key_pair.public_key)
@@ -104,12 +125,17 @@ def create_websocket_host(listen_addrs=None, use_plaintext=False):
     return host
 
 
-async def run(port: int, destination: str, use_plaintext: bool = False) -> None:
-    localhost_ip = "0.0.0.0"
+async def run(
+    port: int, destination: str, use_plaintext: bool = False, use_ipv6: bool = False
+) -> None:
+    localhost_ip = "::" if use_ipv6 else "0.0.0.0"
+    ip_protocol = "ip6" if use_ipv6 else "ip4"
 
     if not destination:
         # Create first host (listener) with WebSocket transport
-        listen_addr = multiaddr.Multiaddr(f"/ip4/{localhost_ip}/tcp/{port}/ws")
+        listen_addr = multiaddr.Multiaddr(
+            f"/{ip_protocol}/{localhost_ip}/tcp/{port}/ws"
+        )
 
         try:
             host = create_websocket_host(use_plaintext=use_plaintext)
@@ -150,7 +176,7 @@ async def run(port: int, destination: str, use_plaintext: bool = False) -> None:
             host.get_network().register_notifee(DebugNotifee())
 
             # Create a cancellation token for clean shutdown
-            cancel_scope = trio.CancelScope()
+            cancel_scope = trio.CancelScope()  # type: ignore
 
             async def signal_handler():
                 with trio.open_signal_receiver(signal.SIGINT, signal.SIGTERM) as (
@@ -182,7 +208,13 @@ async def run(port: int, destination: str, use_plaintext: bool = False) -> None:
                     return
 
                 server_addr = str(addrs[0])
-                client_addr = server_addr.replace("/ip4/0.0.0.0/", "/ip4/127.0.0.1/")
+                # Replace wildcard addresses with localhost for client connections
+                if use_ipv6:
+                    client_addr = server_addr.replace("/ip6/::/", "/ip6/[::1]/")
+                else:
+                    client_addr = server_addr.replace(
+                        "/ip4/0.0.0.0/", "/ip4/127.0.0.1/"
+                    )
 
                 print("🌐 WebSocket Server Started Successfully!")
                 print("=" * 50)
@@ -235,7 +267,9 @@ async def run(port: int, destination: str, use_plaintext: bool = False) -> None:
 
     else:
         # Create second host (dialer) with WebSocket transport
-        listen_addr = multiaddr.Multiaddr(f"/ip4/{localhost_ip}/tcp/{port}/ws")
+        listen_addr = multiaddr.Multiaddr(
+            f"/{ip_protocol}/{localhost_ip}/tcp/{port}/ws"
+        )
 
         try:
             # Create a single host for client operations
@@ -393,29 +427,52 @@ async def run(port: int, destination: str, use_plaintext: bool = False) -> None:
 
 def main() -> None:
     description = """
-    This program demonstrates the libp2p WebSocket transport.
-    First run
-    'python websocket_demo.py -p <PORT> [--plaintext]' to start a WebSocket server.
-    Then run
-    'python websocket_demo.py <ANOTHER_PORT> -d <DESTINATION> [--plaintext]'
-    where <DESTINATION> is the multiaddress shown by the server.
+WebSocket Transport Demo for py-libp2p
 
-    By default, this example uses Noise encryption for secure communication.
-    Use --plaintext for testing with unencrypted communication
-    (not recommended for production).
+This program demonstrates the libp2p WebSocket transport with Noise encryption.
+It supports IPv4, IPv6, and DNS addresses with secure communication.
+
+Examples:
+  # Start WebSocket server on IPv4
+  python websocket_demo.py -p 8080
+
+  # Start WebSocket server on IPv6
+  python websocket_demo.py -p 8080 --ipv6
+
+  # Connect to server (use the address shown by the server)
+  python websocket_demo.py -p 8081 -d /ip4/127.0.0.1/tcp/8080/ws/p2p/<PEER_ID>
+
+  # Use plaintext security (not recommended for production)
+  python websocket_demo.py -p 8080 --plaintext
+
+By default, this example uses Noise encryption for secure communication.
+Use --plaintext for testing with unencrypted communication.
     """
 
     example_maddr = (
         "/ip4/127.0.0.1/tcp/8888/ws/p2p/QmQn4SwGkDZKkUEpBRBvTmheQycxAHJUNmVEnjA2v1qe8Q"
     )
 
-    parser = argparse.ArgumentParser(description=description)
-    parser.add_argument("-p", "--port", default=0, type=int, help="source port number")
+    parser = argparse.ArgumentParser(
+        description=description, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "-p",
+        "--port",
+        default=0,
+        type=int,
+        help="source port number (0 for random port)",
+    )
     parser.add_argument(
         "-d",
         "--destination",
         type=str,
         help=f"destination multiaddr string, e.g. {example_maddr}",
+    )
+    parser.add_argument(
+        "--ipv6",
+        action="store_true",
+        help="use IPv6 address (::) instead of IPv4 (0.0.0.0)",
     )
     parser.add_argument(
         "--plaintext",
@@ -433,7 +490,7 @@ def main() -> None:
     use_plaintext = args.plaintext
 
     try:
-        trio.run(run, args.port, args.destination, use_plaintext)
+        trio.run(run, args.port, args.destination, use_plaintext, args.ipv6)
     except KeyboardInterrupt:
         # This is expected when Ctrl+C is pressed
         # The signal handler already printed the shutdown message

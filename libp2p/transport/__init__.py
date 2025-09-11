@@ -1,5 +1,9 @@
+"""Transport module for libp2p."""
+
+from typing import TYPE_CHECKING
+
 from .tcp.tcp import TCP
-from .websocket.transport import WebsocketTransport
+from .upgrader import TransportUpgrader
 from .transport_registry import (
     TransportRegistry,
     create_transport_for_multiaddr,
@@ -7,40 +11,55 @@ from .transport_registry import (
     register_transport,
     get_supported_transport_protocols,
 )
-from .upgrader import TransportUpgrader
-from libp2p.abc import ITransport
 
-def create_transport(protocol: str, upgrader: TransportUpgrader | None = None) -> ITransport:
+if TYPE_CHECKING:
+    from libp2p.abc import ITransport
+
+# Try to import WebSocket transport if available
+try:
+    from .websocket.transport import WebsocketTransport
+    _websocket_available = True
+except ImportError:
+    _websocket_available = False
+    WebsocketTransport = None  # type: ignore
+
+
+def create_transport(protocol: str, upgrader: TransportUpgrader | None = None) -> "ITransport":
     """
     Convenience function to create a transport instance.
 
-    :param protocol: The transport protocol ("tcp", "ws", or custom)
-    :param upgrader: Optional transport upgrader (required for WebSocket)
-    :return: Transport instance
+    Args:
+        protocol: The transport protocol ("tcp", "ws", or custom)
+        upgrader: Optional transport upgrader (required for WebSocket)
+
+    Returns:
+        Transport instance
+
+    Raises:
+        ValueError: If protocol is not supported or required arguments missing
     """
-    # First check if it's a built-in protocol
-    if protocol == "ws":
-        if upgrader is None:
-            raise ValueError(f"WebSocket transport requires an upgrader")
-        return WebsocketTransport(upgrader)
-    elif protocol == "tcp":
+    if protocol == "tcp":
         return TCP()
+    elif protocol == "ws":
+        if not _websocket_available or WebsocketTransport is None:
+            raise ValueError("WebSocket transport not available. Install trio-websocket: pip install trio-websocket")
+        if upgrader is None:
+            raise ValueError("WebSocket transport requires an upgrader")
+        return WebsocketTransport(upgrader)
     else:
         # Check if it's a custom registered transport
         registry = get_transport_registry()
-        transport_class = registry.get_transport(protocol)
-        if transport_class:
-            transport = registry.create_transport(protocol, upgrader)
-            if transport is None:
-                raise ValueError(f"Failed to create transport for protocol: {protocol}")
-            return transport
-        else:
+        transport = registry.create_transport(protocol, upgrader)
+        if transport is None:
             raise ValueError(f"Unsupported transport protocol: {protocol}")
+        return transport
+
 
 __all__ = [
     "TCP",
-    "WebsocketTransport",
+    "TransportUpgrader",
     "TransportRegistry",
+    "WebsocketTransport",
     "create_transport_for_multiaddr",
     "create_transport",
     "get_transport_registry",

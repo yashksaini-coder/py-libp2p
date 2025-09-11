@@ -270,7 +270,7 @@ def new_swarm(
 
         if transport_maybe is None:
             # Fallback to TCP if no specific transport found
-            if addr.__contains__("tcp"):
+            if addr.__contains__("tcp") and not addr.__contains__("ws"):
                 transport = TCP()
             elif addr.__contains__("quic"):
                 transport = QUICTransport(key_pair.private_key, config=quic_transport_opt)
