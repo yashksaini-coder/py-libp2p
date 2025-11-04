@@ -7,7 +7,7 @@ to close when connection limits are exceeded, matching JavaScript libp2p behavio
 Reference: https://github.com/libp2p/js-libp2p/blob/main/packages/libp2p/src/connection-manager/connection-pruner.ts
 """
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from multiaddr import Multiaddr
 
@@ -280,17 +280,38 @@ class ConnectionPruner:
             })
 
         # Sort by multiple criteria (stable sort, reverse order for each sort)
+        # Helper functions to safely get numeric values
+        def get_float_val(item_dict: dict[str, Any], key: str) -> float:
+            val = item_dict.get(key, 0)
+            if isinstance(val, (int, float)):
+                return float(val)
+            return 0.0
+
+        def get_int_val(item_dict: dict[str, Any], key: str) -> int:
+            val = item_dict.get(key, 0)
+            if isinstance(val, (int, float)):
+                return int(val)
+            return 0
+
         # 1. Sort by connection age (oldest first)
-        connection_data.sort(key=lambda x: float(x["age"]))
+        for item in connection_data:
+            item["_sort_age"] = get_float_val(item, "age")
+        connection_data.sort(key=lambda x: x.get("_sort_age", 0.0))
 
         # 2. Sort by direction (inbound first, then outbound)
-        connection_data.sort(key=lambda x: int(x["direction"]))
+        for item in connection_data:
+            item["_sort_direction"] = get_int_val(item, "direction")
+        connection_data.sort(key=lambda x: x.get("_sort_direction", 0))
 
         # 3. Sort by stream count (lowest first)
-        connection_data.sort(key=lambda x: int(x["stream_count"]))
+        for item in connection_data:
+            item["_sort_streams"] = get_int_val(item, "stream_count")
+        connection_data.sort(key=lambda x: x.get("_sort_streams", 0))
 
         # 4. Sort by peer tag value (lowest first) - most important
-        connection_data.sort(key=lambda x: int(x["peer_value"]))
+        for item in connection_data:
+            item["_sort_peer_value"] = get_int_val(item, "peer_value")
+        connection_data.sort(key=lambda x: x.get("_sort_peer_value", 0))
 
         # Extract connections - we know they're INetConn from construction
         return [item["conn"] for item in connection_data]  # type: ignore[misc]
