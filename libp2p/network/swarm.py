@@ -142,10 +142,6 @@ class Swarm(Service, INetworkService):
         self._round_robin_index = {}
         self._resource_manager = None
 
-    def set_resource_manager(self, resource_manager: ResourceManager | None) -> None:
-        """Attach a ResourceManager to wire connection/stream scopes."""
-        self._resource_manager = resource_manager
-
         # Connection limit tracking
         self._incoming_pending_connections = 0
         self._outbound_pending_connections = 0
@@ -154,7 +150,7 @@ class Swarm(Service, INetworkService):
         # Create address manager with custom sorter if provided
         address_manager = AddressManager(
             address_sorter=self.connection_config.address_sorter,
-            connection_gater=getattr(self, "connection_gater", None),
+            connection_gater=None,  # Will be set after connection_gate is created
         )
 
         self.dial_queue = DialQueue(
@@ -194,6 +190,14 @@ class Swarm(Service, INetworkService):
             deny_list=self.connection_config.deny_list,
             allow_private_addresses=True,  # Default to allowing private addresses
         )
+
+        # Update address manager with connection gate now that it's created
+        if address_manager:
+            address_manager.connection_gater = self.connection_gate
+
+    def set_resource_manager(self, resource_manager: ResourceManager | None) -> None:
+        """Attach a ResourceManager to wire connection/stream scopes."""
+        self._resource_manager = resource_manager
 
     async def run(self) -> None:
         async with trio.open_nursery() as nursery:
