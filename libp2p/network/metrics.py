@@ -117,10 +117,10 @@ class ConnectionMetrics:
                         protocol = str(protocol)
 
                     # Direction tracking: Currently not available in Python libp2p
-                    # We'll track as "unknown" for now, or infer from connection if available
+                    # We'll track as "unknown" for now
                     direction = "unknown"
-                    # TODO: Add direction tracking when connection state management is implemented
-                    # For now, we'll use a generic key format
+                    # TODO: Add direction tracking when connection state
+                    # management is implemented
                     # Note: JS libp2p uses "{direction} {protocol}" format
                     # We'll use "{protocol}" until direction tracking is added
 
