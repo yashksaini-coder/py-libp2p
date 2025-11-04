@@ -27,6 +27,7 @@ from libp2p.custom_types import (
 from libp2p.io.abc import (
     ReadWriteCloser,
 )
+from libp2p.network.address_manager import AddressManager
 from libp2p.network.config import ConnectionConfig, RetryConfig
 from libp2p.network.connection_gate import ConnectionGate
 from libp2p.network.connection_pruner import ConnectionPruner
@@ -141,11 +142,18 @@ class Swarm(Service, INetworkService):
         self._outbound_pending_connections = 0
 
         # Initialize connection queues
+        # Create address manager with custom sorter if provided
+        address_manager = AddressManager(
+            address_sorter=self.connection_config.address_sorter,
+            connection_gater=getattr(self, "connection_gater", None),
+        )
+
         self.dial_queue = DialQueue(
             swarm=self,
             max_parallel_dials=self.connection_config.max_parallel_dials,
             max_dial_queue_length=self.connection_config.max_dial_queue_length,
             dial_timeout=self.connection_config.dial_timeout,
+            address_manager=address_manager,
         )
 
         self.reconnect_queue = ReconnectQueue(
@@ -423,10 +431,14 @@ class Swarm(Service, INetworkService):
             # Get peer info from peer store
             addrs = self.peerstore.addrs(peer_id)
         except PeerStoreError as error:
-            raise SwarmException(f"No known addresses to peer {peer_id}") from error
+            raise SwarmException(
+                f"No known addresses to peer {peer_id}"
+            ) from error
 
         if not addrs:
-            raise SwarmException(f"No known addresses to peer {peer_id}")
+            raise SwarmException(
+                f"No known addresses to peer {peer_id}"
+            )
 
         connections = []
         exceptions: list[SwarmException] = []

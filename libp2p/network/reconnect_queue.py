@@ -239,7 +239,8 @@ class ReconnectQueue:
         try:
             with cancel_scope:
                 logger.debug(
-                    f"Reconnecting to {peer_id} attempt {job.attempt + 1} of {self.retries}"
+                    f"Reconnecting to {peer_id} attempt "
+                    f"{job.attempt + 1} of {self.retries}"
                 )
 
                 # Attempt to dial peer
@@ -263,7 +264,8 @@ class ReconnectQueue:
             if job.attempt >= self.retries:
                 # Max retries reached - remove KEEP_ALIVE tag
                 logger.warning(
-                    f"Max reconnection attempts ({self.retries}) reached for {peer_id}, removing KEEP_ALIVE tag"
+                    f"Max reconnection attempts ({self.retries}) reached "
+                    f"for {peer_id}, removing KEEP_ALIVE tag"
                 )
                 await self._remove_keep_alive_tag(peer_id)
                 async with self._jobs_lock:
@@ -333,7 +335,8 @@ class ReconnectQueue:
             ]
 
             logger.debug(
-                f"Found {len(keep_alive_peers)} peers with KEEP_ALIVE tag, attempting to reconnect"
+                f"Found {len(keep_alive_peers)} peers with KEEP_ALIVE tag, "
+                f"attempting to reconnect"
             )
 
             # Attempt to reconnect to each (don't wait for all to complete)
