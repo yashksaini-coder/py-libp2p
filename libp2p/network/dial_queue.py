@@ -435,16 +435,16 @@ class DialQueue:
             raise RuntimeError("Failed to dial peer - no peer_id provided")
 
         # Resolve and prepare provided multiaddrs
-        resolved_addrs: list[Multiaddr] = []
+        resolved_multiaddrs: list[Multiaddr] = []
         for addr in multiaddrs:
             try:
                 resolved = await self.dns_resolver.resolve(addr)
-                resolved_addrs.extend(resolved)
+                resolved_multiaddrs.extend(resolved)
             except Exception:
-                resolved_addrs.append(addr)
+                resolved_multiaddrs.append(addr)
 
         prepared_addrs = self.address_manager.prepare_addresses(
-            resolved_addrs, peer_id=peer_id
+            resolved_multiaddrs, peer_id=peer_id
         )
 
         for multiaddr in prepared_addrs:

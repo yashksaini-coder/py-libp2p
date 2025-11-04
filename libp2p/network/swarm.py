@@ -164,9 +164,12 @@ class Swarm(Service, INetworkService):
             max_parallel_reconnects=self.connection_config.max_parallel_reconnects,
         )
 
+        # Convert allow_list strings to Multiaddr for ConnectionPruner
+        # ConnectionPruner uses ConnectionGate which handles strings
+        # For now, pass empty list - ConnectionGate handles the allow list
         self.connection_pruner = ConnectionPruner(
             swarm=self,
-            allow_list=self.connection_config.allow_list or [],
+            allow_list=[],  # ConnectionGate handles allow_list filtering
         )
 
         # Initialize rate limiter for incoming connections
@@ -1082,15 +1085,20 @@ class Swarm(Service, INetworkService):
             })
 
         # Also include running jobs snapshot
-        running_snapshot = list(self.dial_queue._running_jobs)
-        for job in running_snapshot:
-            queue_info.append({
-                "id": job.job_id,
-                "peer_id": job.peer_id,
-                "multiaddrs": [Multiaddr(ma) for ma in job.multiaddrs],
-                "priority": job.priority,
-                "status": "running",
-            })
+        if (
+            self.dial_queue
+            and hasattr(self.dial_queue, "_running_jobs")
+            and self.dial_queue._running_jobs is not None
+        ):
+            running_snapshot = list(self.dial_queue._running_jobs)
+            for job in running_snapshot:
+                queue_info.append({
+                    "id": job.job_id,
+                    "peer_id": job.peer_id,
+                    "multiaddrs": [Multiaddr(ma) for ma in job.multiaddrs],
+                    "priority": job.priority,
+                    "status": "running",
+                })
 
         return queue_info
 

@@ -69,17 +69,19 @@ def get_peer_tag_value(peer_store: IPeerStore, peer_id: ID) -> int:
 
 
 def is_connection_in_allow_list(
-    connection: INetConn, allow_list: list[Multiaddr]
+    connection: INetConn, swarm: "Swarm"
 ) -> bool:
     """
     Check if connection is in the allow list.
+
+    Uses ConnectionGate to check if connection's IP is in allow list.
 
     Parameters
     ----------
     connection : INetConn
         Connection to check
-    allow_list : list[Multiaddr]
-        List of allowed multiaddrs (IP networks)
+    swarm : Swarm
+        Swarm instance to access connection gate
 
     Returns
     -------
@@ -87,21 +89,23 @@ def is_connection_in_allow_list(
         True if connection is in allow list
 
     """
-    if not allow_list:
+    if not swarm.connection_gate:
         return False
 
     try:
-        # Get remote address from connection
-        # TODO: Check if connection has remoteAddr property
-        # For now, try to get from peer store
-        if (
-            hasattr(connection, "muxed_conn")
-            and hasattr(connection.muxed_conn, "peer_id")
+        # Get peer ID from connection
+        if hasattr(connection, "muxed_conn") and hasattr(
+            connection.muxed_conn, "peer_id"
         ):
-            # Try to match against peer addresses
-            # This is a simplified check - full implementation would extract
-            # IP from multiaddr
-            return False  # Simplified for now
+            peer_id = connection.muxed_conn.peer_id
+            # Get peer addresses from peerstore
+            peer_addrs = swarm.peerstore.addrs(peer_id)
+            # Check if any peer address is in allow list
+            connection_gate = swarm.connection_gate
+            if connection_gate is not None:
+                for addr in peer_addrs:
+                    if connection_gate.is_in_allow_list(addr):
+                        return True
     except Exception:
         pass
 
@@ -125,10 +129,12 @@ class ConnectionPruner:
         swarm : Swarm
             The swarm instance
         allow_list : list[Multiaddr] | None
-            List of multiaddrs that should never be pruned
+            List of multiaddrs that should never be pruned (deprecated,
+            now uses ConnectionGate)
 
         """
         self.swarm = swarm
+        # Keep for backward compatibility but use ConnectionGate instead
         self.allow_list = allow_list or []
         self._started = False
 
@@ -193,7 +199,7 @@ class ConnectionPruner:
             )
 
             # Check allow list (connections in allow list are never pruned)
-            if is_connection_in_allow_list(connection, self.allow_list):
+            if is_connection_in_allow_list(connection, self.swarm):
                 continue
 
             to_close.append(connection)
@@ -245,24 +251,30 @@ class ConnectionPruner:
 
             # Get stream count
             stream_count = 0
-            if hasattr(conn, "streams"):
-                if isinstance(conn.streams, (list, set, tuple)):
-                    stream_count = len(conn.streams)
-                elif hasattr(conn, "get_streams"):
-                    try:
-                        streams = conn.get_streams()
-                        stream_count = len(streams) if streams else 0
-                    except Exception:
-                        pass
+            streams_attr = getattr(conn, "streams", None)
+            if streams_attr is not None and isinstance(
+                streams_attr, (list, set, tuple)
+            ):
+                stream_count = len(streams_attr)
+            elif hasattr(conn, "get_streams"):
+                try:
+                    streams = conn.get_streams()
+                    stream_count = len(streams) if streams else 0
+                except Exception:
+                    pass
 
             # Get connection age (use creation time if available, otherwise 0)
-            connection_age = 0
-            if hasattr(conn, "_created_at"):
-                connection_age = conn._created_at
+            connection_age = 0.0
+            created_at = getattr(conn, "_created_at", None)
+            if created_at is not None and isinstance(created_at, (int, float)):
+                connection_age = float(created_at)
             elif hasattr(conn, "muxed_conn"):
                 # Try to get from muxed connection
-                if hasattr(conn.muxed_conn, "_created_at"):
-                    connection_age = conn.muxed_conn._created_at
+                muxed_created_at = getattr(conn.muxed_conn, "_created_at", None)
+                if muxed_created_at is not None and isinstance(
+                    muxed_created_at, (int, float)
+                ):
+                    connection_age = float(muxed_created_at)
 
             # Get peer value
             peer_value = peer_values.get(peer_id, 0) if peer_id else 0
@@ -293,25 +305,54 @@ class ConnectionPruner:
                 return int(val)
             return 0
 
+        # Pre-compute sort keys to avoid type issues
         # 1. Sort by connection age (oldest first)
         for item in connection_data:
             item["_sort_age"] = get_float_val(item, "age")
-        connection_data.sort(key=lambda x: x.get("_sort_age", 0.0))
+
+        def get_sort_age(x: dict[str, Any]) -> float:
+            val = x.get("_sort_age", 0.0)
+            if isinstance(val, (int, float)):
+                return float(val)
+            return 0.0
+
+        connection_data.sort(key=get_sort_age)
 
         # 2. Sort by direction (inbound first, then outbound)
         for item in connection_data:
             item["_sort_direction"] = get_int_val(item, "direction")
-        connection_data.sort(key=lambda x: x.get("_sort_direction", 0))
+
+        def get_sort_direction(x: dict[str, Any]) -> int:
+            val = x.get("_sort_direction", 0)
+            if isinstance(val, (int, float)):
+                return int(val)
+            return 0
+
+        connection_data.sort(key=get_sort_direction)
 
         # 3. Sort by stream count (lowest first)
         for item in connection_data:
             item["_sort_streams"] = get_int_val(item, "stream_count")
-        connection_data.sort(key=lambda x: x.get("_sort_streams", 0))
+
+        def get_sort_streams(x: dict[str, Any]) -> int:
+            val = x.get("_sort_streams", 0)
+            if isinstance(val, (int, float)):
+                return int(val)
+            return 0
+
+        connection_data.sort(key=get_sort_streams)
 
         # 4. Sort by peer tag value (lowest first) - most important
         for item in connection_data:
             item["_sort_peer_value"] = get_int_val(item, "peer_value")
-        connection_data.sort(key=lambda x: x.get("_sort_peer_value", 0))
+
+        def get_sort_peer_value(x: dict[str, Any]) -> int:
+            val = x.get("_sort_peer_value", 0)
+            if isinstance(val, (int, float)):
+                return int(val)
+            return 0
+
+        connection_data.sort(key=get_sort_peer_value)
 
         # Extract connections - we know they're INetConn from construction
         return [item["conn"] for item in connection_data]  # type: ignore[misc]

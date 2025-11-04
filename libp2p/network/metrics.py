@@ -13,6 +13,10 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from libp2p.abc import INetConn, INetStream
     from libp2p.peer.id import ID
+else:
+    # Runtime imports for type annotations
+    from libp2p.abc import INetConn, INetStream
+    from libp2p.peer.id import ID
 
 
 @dataclass

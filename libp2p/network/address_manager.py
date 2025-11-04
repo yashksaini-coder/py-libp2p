@@ -294,7 +294,10 @@ class AddressManager:
         filtered = []
         for addr in addresses:
             # Check if dialing this multiaddr is allowed
-            if hasattr(self.connection_gater, "deny_dial_multiaddr"):
+            if (
+                self.connection_gater is not None
+                and hasattr(self.connection_gater, "deny_dial_multiaddr")
+            ):
                 try:
                     if self.connection_gater.deny_dial_multiaddr(addr):
                         logger.debug(
@@ -309,7 +312,11 @@ class AddressManager:
                     pass
 
             # Check if dialing this peer is allowed
-            if peer_id and hasattr(self.connection_gater, "deny_dial_peer"):
+            if (
+                peer_id
+                and self.connection_gater is not None
+                and hasattr(self.connection_gater, "deny_dial_peer")
+            ):
                 try:
                     if self.connection_gater.deny_dial_peer(peer_id):
                         logger.debug(
