@@ -4,7 +4,7 @@ from collections.abc import (
 )
 import logging
 import random
-from typing import cast
+from typing import Any, cast
 
 from multiaddr import (
     Multiaddr,
@@ -28,12 +28,18 @@ from libp2p.io.abc import (
     ReadWriteCloser,
 )
 from libp2p.network.config import ConnectionConfig, RetryConfig
+from libp2p.network.connection_gate import ConnectionGate
+from libp2p.network.connection_pruner import ConnectionPruner
+from libp2p.network.dial_queue import DialQueue
+from libp2p.network.rate_limiter import ConnectionRateLimiter
+from libp2p.network.reconnect_queue import ReconnectQueue
 from libp2p.peer.id import (
     ID,
 )
 from libp2p.peer.peerstore import (
     PeerStoreError,
 )
+from libp2p.relay.circuit_v2.nat import extract_ip_from_multiaddr
 from libp2p.tools.async_service import (
     Service,
 )
@@ -90,6 +96,13 @@ class Swarm(Service, INetworkService):
     connection_config: ConnectionConfig | QUICTransportConfig
     _round_robin_index: dict[ID, int]
 
+    # Connection queues
+    dial_queue: DialQueue | None
+    reconnect_queue: ReconnectQueue | None
+    connection_pruner: ConnectionPruner | None
+    rate_limiter: ConnectionRateLimiter | None
+    connection_gate: ConnectionGate | None
+
     def __init__(
         self,
         peer_id: ID,
@@ -123,6 +136,45 @@ class Swarm(Service, INetworkService):
         # Load balancing state
         self._round_robin_index = {}
 
+        # Connection limit tracking
+        self._incoming_pending_connections = 0
+        self._outbound_pending_connections = 0
+
+        # Initialize connection queues
+        self.dial_queue = DialQueue(
+            swarm=self,
+            max_parallel_dials=self.connection_config.max_parallel_dials,
+            max_dial_queue_length=self.connection_config.max_dial_queue_length,
+            dial_timeout=self.connection_config.dial_timeout,
+        )
+
+        self.reconnect_queue = ReconnectQueue(
+            swarm=self,
+            retries=self.connection_config.reconnect_retries,
+            retry_interval=self.connection_config.reconnect_retry_interval,
+            backoff_factor=self.connection_config.reconnect_backoff_factor,
+            max_parallel_reconnects=self.connection_config.max_parallel_reconnects,
+        )
+
+        self.connection_pruner = ConnectionPruner(
+            swarm=self,
+            allow_list=self.connection_config.allow_list or [],
+        )
+
+        # Initialize rate limiter for incoming connections
+        self.rate_limiter = ConnectionRateLimiter(
+            points=self.connection_config.inbound_connection_threshold,
+            duration=1.0,  # Per second
+            block_duration=0.0,  # No blocking by default
+        )
+
+        # Initialize connection gate for allow/deny lists
+        self.connection_gate = ConnectionGate(
+            allow_list=self.connection_config.allow_list,
+            deny_list=self.connection_config.deny_list,
+            allow_private_addresses=True,  # Default to allowing private addresses
+        )
+
     async def run(self) -> None:
         async with trio.open_nursery() as nursery:
             # Create a nursery for listener tasks.
@@ -133,9 +185,25 @@ class Swarm(Service, INetworkService):
                 self.transport.set_background_nursery(nursery)
                 self.transport.set_swarm(self)
 
+            # Start connection queues and pruner
+            if self.dial_queue:
+                await self.dial_queue.start()
+            if self.reconnect_queue:
+                await self.reconnect_queue.start()
+            if self.connection_pruner:
+                await self.connection_pruner.start()
+
             try:
                 await self.manager.wait_finished()
             finally:
+                # Stop connection queues and pruner
+                if self.connection_pruner:
+                    await self.connection_pruner.stop()
+                if self.reconnect_queue:
+                    await self.reconnect_queue.stop()
+                if self.dial_queue:
+                    await self.dial_queue.stop()
+
                 # The service ended. Cancel listener tasks.
                 nursery.cancel_scope.cancel()
                 # Indicate that the nursery has been cancelled.
@@ -202,11 +270,127 @@ class Swarm(Service, INetworkService):
         conns = self.get_connections(peer_id)
         return conns[0] if conns else None
 
-    async def dial_peer(self, peer_id: ID) -> list[INetConn]:
+    def get_total_connections(self) -> int:
         """
-        Try to create connections to peer_id with enhanced retry logic.
+        Get total number of active connections.
+
+        Returns
+        -------
+        int
+            Total number of connections across all peers
+
+        """
+        return sum(len(conns) for conns in self.connections.values())
+
+    def accept_incoming_connection(self, remote_addr: Multiaddr | None = None) -> bool:
+        """
+        Check if an incoming connection should be accepted.
+
+        Checks:
+        - Deny list (if configured)
+        - Allow list (always accepts if in allow list)
+        - Pending connections limit
+        - Global connection limit
+
+        Parameters
+        ----------
+        remote_addr : Multiaddr | None
+            Remote address of the incoming connection (for allow/deny list checks)
+
+        Returns
+        -------
+        bool
+            True if connection should be accepted, False otherwise
+
+        """
+        # Check connection gate (allow/deny lists)
+        if remote_addr and self.connection_gate:
+            # Check deny list first (deny takes precedence)
+            if not self.connection_gate.is_allowed(remote_addr):
+                logger.debug(
+                    f"Connection from {remote_addr} refused - "
+                    "connection remote address was in deny list or not in allow list"
+                )
+                return False
+
+            # Check if connection is in allow list (if allow list exists)
+            # If in allow list, skip rate limiting and go straight to limits check
+            if (
+                self.connection_config.allow_list
+                and self.connection_gate.is_in_allow_list(remote_addr)
+            ):
+                # Connection is in allow list - skip rate limiting
+                # Still check pending/global limits
+                max_pending = self.connection_config.max_incoming_pending_connections
+                if self._incoming_pending_connections >= max_pending:
+                    logger.debug(
+                        f"Connection from {remote_addr} refused - "
+                        f"incomingPendingConnections exceeded"
+                    )
+                    return False
+
+                total_connections = self.get_total_connections()
+                if total_connections >= self.connection_config.max_connections:
+                    logger.debug(
+                        f"Connection from {remote_addr} refused - "
+                        f"maxConnections exceeded"
+                    )
+                    return False
+
+                # Accept connection from allow list
+                self._incoming_pending_connections += 1
+                return True
+
+        # Check pending connections limit
+        max_pending = self.connection_config.max_incoming_pending_connections
+        if self._incoming_pending_connections >= max_pending:
+            logger.debug(
+                f"Connection from {remote_addr} refused - "
+                f"incomingPendingConnections ({self._incoming_pending_connections}) "
+                f"exceeded limit ({max_pending})"
+            )
+            return False
+
+        # Check rate limiting (per-host) - only if not in allow list
+        if remote_addr and self.rate_limiter:
+            host = extract_ip_from_multiaddr(remote_addr)
+            if host:
+                if not self.rate_limiter.check_and_consume(host):
+                    logger.debug(
+                        f"Connection from {remote_addr} refused - "
+                        f"inboundConnectionThreshold exceeded by host {host}"
+                    )
+                    return False
+
+        # Check global connection limit
+        total_connections = self.get_total_connections()
+        if total_connections >= self.connection_config.max_connections:
+            max_conns = self.connection_config.max_connections
+            logger.debug(
+                f"Connection from {remote_addr} refused - "
+                f"maxConnections ({total_connections}/{max_conns}) exceeded"
+            )
+            return False
+
+        # Accept connection - increment pending counter
+        self._incoming_pending_connections += 1
+        return True
+
+    def after_upgrade_inbound(self) -> None:
+        """
+        Called after an inbound connection is upgraded.
+
+        Decrements the incoming pending connections counter.
+        """
+        if self._incoming_pending_connections > 0:
+            self._incoming_pending_connections -= 1
+
+    async def dial_peer(self, peer_id: ID, priority: int = 50) -> list[INetConn]:
+        """
+        Try to create connections to peer_id using dial queue or direct dial.
 
         :param peer_id: peer if we want to dial
+        :param priority: dial priority (higher = processed first, default: 50)
         :raises SwarmException: raised when an error occurs
         :return: list of muxed connections
         """
@@ -216,7 +400,24 @@ class Swarm(Service, INetworkService):
             logger.debug(f"Reusing existing connections to peer {peer_id}")
             return existing_connections
 
-        logger.debug("attempting to dial peer %s", peer_id)
+        # Use dial queue if available
+        if (
+            self.dial_queue
+            and hasattr(self.dial_queue, "_started")
+            and self.dial_queue._started
+        ):
+            try:
+                logger.debug("attempting to dial peer %s via dial queue", peer_id)
+                connection = await self.dial_queue.dial(peer_id, priority=priority)
+                return [connection]
+            except Exception as e:
+                logger.debug(
+                    f"Dial queue failed for {peer_id}, "
+                    f"falling back to direct dial: {e}"
+                )
+
+        # Fall back to direct dial (original logic)
+        logger.debug("attempting to dial peer %s (direct)", peer_id)
 
         try:
             # Get peer info from peer store
@@ -497,10 +698,30 @@ class Swarm(Service, INetworkService):
             async def conn_handler(
                 read_write_closer: ReadWriteCloser, maddr: Multiaddr = maddr
             ) -> None:
+                # Extract remote address if available
+                remote_addr = None
+                if hasattr(read_write_closer, "remote_addr") or hasattr(
+                    read_write_closer, "_remote_addr"
+                ):
+                    remote_addr = getattr(
+                        read_write_closer, "remote_addr", None
+                    ) or getattr(read_write_closer, "_remote_addr", None)
+
+                # Check connection limits before accepting
+                if not self.accept_incoming_connection(remote_addr or maddr):
+                    logger.debug(
+                        f"Rejecting incoming connection from "
+                        f"{remote_addr or maddr or 'unknown'}"
+                    )
+                    await read_write_closer.close()
+                    return
+
                 # No need to upgrade QUIC Connection
                 if isinstance(self.transport, QUICTransport):
                     try:
                         quic_conn = cast(QUICConnection, read_write_closer)
+                        # Mark as accepted (after upgrade)
+                        self.after_upgrade_inbound()
                         await self.add_conn(quic_conn)
                         peer_id = quic_conn.peer_id
                         logger.debug(
@@ -511,6 +732,8 @@ class Swarm(Service, INetworkService):
                         await self.manager.wait_finished()
                     except Exception:
                         await read_write_closer.close()
+                        # Decrement pending counter on error
+                        self.after_upgrade_inbound()
                     return
 
                 raw_conn = RawConnection(read_write_closer, False)
@@ -522,9 +745,14 @@ class Swarm(Service, INetworkService):
                 except SecurityUpgradeFailure as error:
                     logger.debug("failed to upgrade security for peer at %s", maddr)
                     await raw_conn.close()
+                    # Decrement pending counter on error
+                    self.after_upgrade_inbound()
                     raise SwarmException(
                         f"failed to upgrade security for peer at {maddr}"
                     ) from error
+
+                # Mark as accepted (after security upgrade)
+                self.after_upgrade_inbound()
                 peer_id = secured_conn.get_remote_peer()
 
                 try:
@@ -582,6 +810,14 @@ class Swarm(Service, INetworkService):
             await self._manager.stop()
         else:
             # Perform alternative cleanup if the manager isn't initialized
+            # Stop connection queues and pruner first
+            if hasattr(self, "connection_pruner") and self.connection_pruner:
+                await self.connection_pruner.stop()
+            if hasattr(self, "reconnect_queue") and self.reconnect_queue:
+                await self.reconnect_queue.stop()
+            if hasattr(self, "dial_queue") and self.dial_queue:
+                await self.dial_queue.stop()
+
             # Close all connections manually
             if hasattr(self, "connections"):
                 for peer_id, conns in list(self.connections.items()):
@@ -672,10 +908,22 @@ class Swarm(Service, INetworkService):
 
         self.connections[peer_id].append(swarm_conn)
 
-        # Trim if we exceed max connections
+        # Trim if we exceed max connections per peer
         max_conns = self.connection_config.max_connections_per_peer
         if len(self.connections[peer_id]) > max_conns:
             self._trim_connections(peer_id)
+
+        # Trigger connection pruner to check global limits
+        if self.connection_pruner:
+            # Schedule pruning check (non-blocking)
+            try:
+                if hasattr(self, "manager") and self.manager is not None:
+                    self.manager.run_task(self.connection_pruner.maybe_prune_connections)
+            except AttributeError:
+                # Fallback if manager not available
+                trio.lowlevel.spawn_system_task(
+                    self.connection_pruner.maybe_prune_connections
+                )
 
         # Call notifiers since event occurred
         await self.notify_connected(swarm_conn)
@@ -713,6 +961,9 @@ class Swarm(Service, INetworkService):
         """
         Simply remove the connection from Swarm's records, without closing
         the connection.
+
+        If this was the last connection to the peer, triggers reconnection
+        queue check for KEEP_ALIVE peers.
         """
         peer_id = swarm_conn.muxed_conn.peer_id
 
@@ -721,7 +972,26 @@ class Swarm(Service, INetworkService):
                 conn for conn in self.connections[peer_id] if conn != swarm_conn
             ]
             if not self.connections[peer_id]:
+                # Last connection to peer removed - trigger reconnection check
                 del self.connections[peer_id]
+
+                # Check if peer should be reconnected (KEEP_ALIVE)
+                if self.reconnect_queue:
+                    try:
+                        if hasattr(self, "manager") and self.manager is not None:
+                            self.manager.run_task(
+                                self.reconnect_queue.maybe_reconnect, peer_id
+                            )
+                        else:
+                            # Manager not available - spawn using trio directly
+                            trio.lowlevel.spawn_system_task(
+                                self.reconnect_queue.maybe_reconnect, peer_id
+                            )
+                    except AttributeError:
+                        # Fallback if manager not available
+                        trio.lowlevel.spawn_system_task(
+                            self.reconnect_queue.maybe_reconnect, peer_id
+                        )
 
     # Notifee
 
@@ -767,6 +1037,50 @@ class Swarm(Service, INetworkService):
         async with trio.open_nursery() as nursery:
             for notifee in self.notifees:
                 nursery.start_soon(notifier, notifee)
+
+    def get_dial_queue(self) -> list[dict[str, Any]]:
+        """
+        Get list of pending dials in the queue.
+
+        Note: This is a synchronous method that returns a snapshot of the queue.
+        For async-safe access, the actual queue state is read without locks
+        (may show slightly stale data).
+
+        Returns
+        -------
+        list[dict]
+            List of pending dial information (matching JS libp2p PendingDial format)
+
+        """
+        if not self.dial_queue:
+            return []
+
+        # Return queue status information (snapshot without locking for sync access)
+        queue_info = []
+
+        # Read queue snapshot (may be slightly stale but safe for sync method)
+        queue_snapshot = list(self.dial_queue._queue)
+        for job in queue_snapshot:
+            queue_info.append({
+                "id": job.job_id,
+                "peer_id": job.peer_id,
+                "multiaddrs": [Multiaddr(ma) for ma in job.multiaddrs],
+                "priority": job.priority,
+                "status": "queued" if not job.running else "running",
+            })
+
+        # Also include running jobs snapshot
+        running_snapshot = list(self.dial_queue._running_jobs)
+        for job in running_snapshot:
+            queue_info.append({
+                "id": job.job_id,
+                "peer_id": job.peer_id,
+                "multiaddrs": [Multiaddr(ma) for ma in job.multiaddrs],
+                "priority": job.priority,
+                "status": "running",
+            })
+
+        return queue_info
 
     # Backward compatibility properties
     @property
