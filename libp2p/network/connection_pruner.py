@@ -119,7 +119,9 @@ class ConnectionPruner:
     should be closed first when the connection limit is exceeded.
     """
 
-    def __init__(self, swarm: "Swarm", allow_list: list[Multiaddr] | None = None):
+    def __init__(
+        self, swarm: "Swarm", allow_list: list[str] | list[Multiaddr] | None = None
+    ):
         """
         Initialize connection pruner.
 
@@ -127,14 +129,18 @@ class ConnectionPruner:
         ----------
         swarm : Swarm
             The swarm instance
-        allow_list : list[Multiaddr] | None
-            List of multiaddrs that should never be pruned (deprecated,
-            now uses ConnectionGate)
+        allow_list : list[str] | list[Multiaddr] | None
+            List of IP addresses/CIDR blocks (str) or multiaddrs that should
+            never be pruned (deprecated, now uses ConnectionGate)
 
         """
         self.swarm = swarm
         # Keep for backward compatibility but use ConnectionGate instead
-        self.allow_list = allow_list or []
+        # Store as-is (type doesn't matter since it's unused)
+        if allow_list is None:
+            self.allow_list: list[str] | list[Multiaddr] = []
+        else:
+            self.allow_list = allow_list
         self._started = False
 
     async def start(self) -> None:
@@ -197,11 +203,13 @@ class ConnectionPruner:
             try:
                 peer_id = connection.muxed_conn.peer_id
                 logger.debug(
-                    f"Too many connections open - considering connection to peer {peer_id}"
+                    f"Too many connections open - considering connection "
+                    f"to peer {peer_id}"
                 )
             except Exception:
                 logger.debug(
-                    "Too many connections open - considering connection with unknown peer"
+                    "Too many connections open - considering connection "
+                    "with unknown peer"
                 )
 
             # Check allow list (connections in allow list are never pruned)
@@ -264,7 +272,8 @@ class ConnectionPruner:
                 streams = conn.get_streams()
                 stream_count = len(streams) if streams else 0
             except Exception:
-                # Fallback: try to access streams attribute if available (SwarmConn specific)
+                # Fallback: try to access streams attribute if available
+                # (SwarmConn specific)
                 try:
                     streams_attr = conn.streams  # type: ignore[attr-defined]
                     if isinstance(streams_attr, (list, set, tuple)):

@@ -343,7 +343,8 @@ class Swarm(Service, INetworkService):
         if self.dial_queue._started:
             try:
                 connection = await self.dial_queue.dial(peer_id)
-                # dial_queue.dial returns a single connection, but we need to return a list
+                # dial_queue.dial returns a single connection,
+                # but we need to return a list
                 if connection:
                     return [connection]
                 else:
@@ -362,12 +363,18 @@ class Swarm(Service, INetworkService):
                     return await self._dial_peer_direct(peer_id)
                 else:
                     # Other RuntimeErrors should be re-raised or fall back
-                    logger.debug(f"Dial queue RuntimeError: {e}, falling back to direct dial")
+                    logger.debug(
+                        f"Dial queue RuntimeError: {e}, falling back to direct dial"
+                    )
                     return await self._dial_peer_direct(peer_id)
             except (SwarmException, Exception) as e:
-                # For other exceptions (connection failures, etc.), check if it's a connection error
+                # For other exceptions (connection failures, etc.),
+                # check if it's a connection error
                 # If dial queue failed completely, fall back to direct dialing
-                logger.debug(f"Dial queue failed with {type(e).__name__}: {e}, falling back to direct dial")
+                logger.debug(
+                    f"Dial queue failed with {type(e).__name__}: {e}, "
+                    f"falling back to direct dial"
+                )
                 return await self._dial_peer_direct(peer_id)
         else:
             # Dial queue not started - use direct dialing
@@ -528,9 +535,7 @@ class Swarm(Service, INetworkService):
                     pre_scope.close()
             except Exception:
                 pass
-            raise SwarmException(
-                f"Unexpected error dialing peer {peer_id}"
-            ) from e
+            raise SwarmException(f"Unexpected error dialing peer {peer_id}") from e
 
         if isinstance(self.transport, QUICTransport) and isinstance(
             raw_conn, IMuxedConn
@@ -541,7 +546,7 @@ class Swarm(Service, INetworkService):
             try:
                 swarm_conn = await self.add_conn(raw_conn)
                 return swarm_conn
-            except Exception as e:
+            except Exception:
                 # Clean up on failure
                 try:
                     await raw_conn.close()
@@ -556,8 +561,10 @@ class Swarm(Service, INetworkService):
 
         logger.debug("dialed peer %s over base transport", peer_id)
         try:
-            swarm_conn = await self.upgrade_outbound_raw_conn(raw_conn, peer_id, pre_scope)
-        except Exception as e:
+            swarm_conn = await self.upgrade_outbound_raw_conn(
+                raw_conn, peer_id, pre_scope
+            )
+        except Exception:
             # Ensure raw_conn is closed if upgrade fails
             try:
                 await raw_conn.close()
@@ -586,7 +593,9 @@ class Swarm(Service, INetworkService):
             # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
             # the conn and then mux the conn
             try:
-                secured_conn = await self.upgrader.upgrade_security(raw_conn, True, peer_id)
+                secured_conn = await self.upgrader.upgrade_security(
+                    raw_conn, True, peer_id
+                )
             except SecurityUpgradeFailure as error:
                 logger.debug("failed to upgrade security for peer %s", peer_id)
                 # Clean up raw connection
@@ -607,7 +616,9 @@ class Swarm(Service, INetworkService):
             logger.debug("upgraded security for peer %s", peer_id)
 
             try:
-                muxed_conn = await self.upgrader.upgrade_connection(secured_conn, peer_id)
+                muxed_conn = await self.upgrader.upgrade_connection(
+                    secured_conn, peer_id
+                )
             except MuxerUpgradeFailure as error:
                 logger.debug("failed to upgrade mux for peer %s", peer_id)
                 # Clean up secured connection
@@ -621,7 +632,9 @@ class Swarm(Service, INetworkService):
                         pre_scope.close()
                 except Exception:
                     pass
-                raise SwarmException(f"failed to upgrade mux for peer {peer_id}") from error
+                raise SwarmException(
+                    f"failed to upgrade mux for peer {peer_id}"
+                ) from error
         except Exception:
             # Ensure cleanup on any unexpected exception
             if secured_conn is not None:
@@ -992,7 +1005,8 @@ class Swarm(Service, INetworkService):
                         if raw_conn is not None:
                             await raw_conn.close()
                         else:
-                            # If raw_conn wasn't created, close the underlying connection
+                            # If raw_conn wasn't created,
+                            # close the underlying connection
                             await read_write_closer.close()
                     except Exception:
                         pass
@@ -1040,13 +1054,15 @@ class Swarm(Service, INetworkService):
         total_connections = len(self.get_connections())
         if total_connections >= self.connection_config.max_connections:
             logger.debug(
-                f"Rejecting incoming connection: max_connections ({self.connection_config.max_connections}) reached"
+                f"Rejecting incoming connection: max_connections "
+                f"({self.connection_config.max_connections}) reached"
             )
             await raw_conn.close()
             raise SwarmException("Maximum connections limit reached")
 
         # Check pending incoming connections limit
-        # Note: We can't easily track pending connections here, but this is a best-effort check
+        # Note: We can't easily track pending connections here,
+        # but this is a best-effort check
         # The actual enforcement happens at the listener level
 
         # Extract IP address for rate limiting and connection gating
@@ -1079,7 +1095,8 @@ class Swarm(Service, INetworkService):
 
             if not self.connection_gate.is_allowed(check_addr):
                 logger.debug(
-                    f"Rejecting incoming connection from {remote_ip}: blocked by connection gate"
+                    f"Rejecting incoming connection from {remote_ip}: "
+                    f"blocked by connection gate"
                 )
                 await raw_conn.close()
                 raise SwarmException("Connection denied by connection gate")
@@ -1088,7 +1105,8 @@ class Swarm(Service, INetworkService):
             if not self.connection_gate.is_in_allow_list(check_addr):
                 if not self.rate_limiter.check_and_consume(remote_ip):
                     logger.debug(
-                        f"Rejecting incoming connection from {remote_ip}: rate limit exceeded"
+                        f"Rejecting incoming connection from {remote_ip}: "
+                        f"rate limit exceeded"
                     )
                     await raw_conn.close()
                     raise SwarmException("Rate limit exceeded for incoming connection")
@@ -1139,7 +1157,9 @@ class Swarm(Service, INetworkService):
             peer_id = secured_conn.get_remote_peer()
 
             try:
-                muxed_conn = await self.upgrader.upgrade_connection(secured_conn, peer_id)
+                muxed_conn = await self.upgrader.upgrade_connection(
+                    secured_conn, peer_id
+                )
             except MuxerUpgradeFailure as error:
                 logger.error("fail to upgrade mux for peer %s", peer_id)
                 # Clean up secured connection
@@ -1158,7 +1178,9 @@ class Swarm(Service, INetworkService):
                         pre_scope.close()
                 except Exception:
                     pass
-                raise SwarmException(f"fail to upgrade mux for peer {peer_id}") from error
+                raise SwarmException(
+                    f"fail to upgrade mux for peer {peer_id}"
+                ) from error
             logger.debug("upgraded mux for peer %s", peer_id)
         except Exception:
             # Ensure cleanup on any unexpected exception

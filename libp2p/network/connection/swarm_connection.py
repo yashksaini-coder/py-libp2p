@@ -102,6 +102,7 @@ class SwarmConn(INetConn):
             try:
                 # Release the resource scope
                 import inspect
+
                 if hasattr(self._resource_scope, "close"):
                     close_method = getattr(self._resource_scope, "close")
                     # Check if close() is a coroutine
