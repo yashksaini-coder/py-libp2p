@@ -253,7 +253,7 @@ class AddressManager:
     def __init__(
         self,
         address_sorter: (Callable[[list[Multiaddr]], list[Multiaddr]] | None) = None,
-        connection_gater: Any | None = None,
+        connection_gate: Any | None = None,
     ):
         """
         Initialize address manager.
@@ -262,12 +262,12 @@ class AddressManager:
         ----------
         address_sorter : callable | None
             Custom address sorter function. If None, uses default sorter.
-        connection_gater : ConnectionGater | None
+        connection_gate : ConnectionGater | None
             Connection gater for filtering addresses
 
         """
         self.address_sorter = address_sorter or default_address_sorter
-        self.connection_gater = connection_gater
+        self.connection_gate = connection_gate
 
     def filter_addresses(
         self,
@@ -290,17 +290,17 @@ class AddressManager:
             Filtered list of addresses
 
         """
-        if not self.connection_gater:
+        if not self.connection_gate:
             return addresses
 
         filtered = []
         for addr in addresses:
             # Check if dialing this multiaddr is allowed
-            if self.connection_gater is not None and hasattr(
-                self.connection_gater, "deny_dial_multiaddr"
+            if self.connection_gate is not None and hasattr(
+                self.connection_gate, "deny_dial_multiaddr"
             ):
                 try:
-                    if self.connection_gater.deny_dial_multiaddr(addr):
+                    if self.connection_gate.deny_dial_multiaddr(addr):
                         logger.debug(f"Address {addr} denied by connection gater")
                         continue
                 except Exception as e:
@@ -311,11 +311,11 @@ class AddressManager:
             # Check if dialing this peer is allowed
             if (
                 peer_id
-                and self.connection_gater is not None
-                and hasattr(self.connection_gater, "deny_dial_peer")
+                and self.connection_gate is not None
+                and hasattr(self.connection_gate, "deny_dial_peer")
             ):
                 try:
-                    if self.connection_gater.deny_dial_peer(peer_id):
+                    if self.connection_gate.deny_dial_peer(peer_id):
                         logger.debug(f"Peer {peer_id} denied by connection gater")
                         continue
                 except Exception as e:

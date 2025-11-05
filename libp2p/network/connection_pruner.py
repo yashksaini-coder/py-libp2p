@@ -6,6 +6,7 @@ to close when connection limits are exceeded, matching JavaScript libp2p behavio
 
 Reference: https://github.com/libp2p/js-libp2p/blob/main/packages/libp2p/src/connection-manager/connection-pruner.ts
 """
+
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -39,7 +40,8 @@ def get_peer_tag_value(peer_store: IPeerStore, peer_id: ID) -> int:
     """
     try:
         # Access peer_data_map - it exists on PeerStore implementation
-        peer_data_map = getattr(peer_store, "peer_data_map", None)
+        # Use try/except instead of getattr for better error handling
+        peer_data_map = peer_store.peer_data_map  # type: ignore[attr-defined]
         if peer_data_map is None:
             return 0
         peer_data = peer_data_map.get(peer_id)
@@ -48,6 +50,7 @@ def get_peer_tag_value(peer_store: IPeerStore, peer_id: ID) -> int:
 
         # TODO: Replace with proper tags support when peer tags are implemented
         # For now, check metadata for tag-like values
+        # metadata is a common attribute on peer data
         if hasattr(peer_data, "metadata") and peer_data.metadata:
             tag_value = 0
             # Look for metadata keys that might represent tags
@@ -63,18 +66,20 @@ def get_peer_tag_value(peer_store: IPeerStore, peer_id: ID) -> int:
             return tag_value
 
         return 0
+    except AttributeError:
+        # peer_data_map might not exist on all peer store implementations
+        return 0
     except Exception as e:
         logger.debug(f"Error getting peer tag value for {peer_id}: {e}")
         return 0
 
 
-def is_connection_in_allow_list(
-    connection: INetConn, swarm: "Swarm"
-) -> bool:
+def is_connection_in_allow_list(connection: INetConn, swarm: "Swarm") -> bool:
     """
     Check if connection is in the allow list.
 
     Uses ConnectionGate to check if connection's IP is in allow list.
+    ConnectionGate is a required attribute of Swarm.
 
     Parameters
     ----------
@@ -86,28 +91,22 @@ def is_connection_in_allow_list(
     Returns
     -------
     bool
-        True if connection is in allow list
+        True if connection is in allow list, False otherwise
 
     """
-    if not swarm.connection_gate:
-        return False
-
     try:
-        # Get peer ID from connection
-        if hasattr(connection, "muxed_conn") and hasattr(
-            connection.muxed_conn, "peer_id"
-        ):
-            peer_id = connection.muxed_conn.peer_id
-            # Get peer addresses from peerstore
-            peer_addrs = swarm.peerstore.addrs(peer_id)
-            # Check if any peer address is in allow list
-            connection_gate = swarm.connection_gate
-            if connection_gate is not None:
-                for addr in peer_addrs:
-                    if connection_gate.is_in_allow_list(addr):
-                        return True
-    except Exception:
-        pass
+        # muxed_conn is a required attribute of INetConn interface
+        peer_id = connection.muxed_conn.peer_id
+        # Get peer addresses from peerstore
+        peer_addrs = swarm.peerstore.addrs(peer_id)
+        # Check if any peer address is in allow list
+        # connection_gate is a required attribute of Swarm
+        for addr in peer_addrs:
+            if swarm.connection_gate.is_in_allow_list(addr):
+                return True
+    except Exception as e:
+        logger.debug(f"Error checking allow list for connection: {e}")
+        return False
 
     return False
 
@@ -176,14 +175,16 @@ class ConnectionPruner:
         # Calculate peer values (sum of tag values)
         peer_values: dict[ID, int] = {}
         for connection in connections:
-            peer_id = None
-            if hasattr(connection, "muxed_conn"):
+            try:
+                # muxed_conn is a required attribute of INetConn interface
                 peer_id = connection.muxed_conn.peer_id
-            if peer_id is None:
+                if peer_id not in peer_values:
+                    peer_values[peer_id] = get_peer_tag_value(
+                        self.swarm.peerstore, peer_id
+                    )
+            except Exception as e:
+                logger.debug(f"Error getting peer_id from connection: {e}")
                 continue
-
-            if peer_id not in peer_values:
-                peer_values[peer_id] = get_peer_tag_value(self.swarm.peerstore, peer_id)
 
         # Sort connections for pruning
         sorted_connections = self.sort_connections(connections, peer_values)
@@ -193,10 +194,15 @@ class ConnectionPruner:
         to_close: list[INetConn] = []
 
         for connection in sorted_connections:
-            logger.debug(
-                f"Too many connections open - considering connection to peer "
-                f"{connection.muxed_conn.peer_id if hasattr(connection, 'muxed_conn') else 'unknown'}"  # noqa: E501
-            )
+            try:
+                peer_id = connection.muxed_conn.peer_id
+                logger.debug(
+                    f"Too many connections open - considering connection to peer {peer_id}"
+                )
+            except Exception:
+                logger.debug(
+                    "Too many connections open - considering connection with unknown peer"
+                )
 
             # Check allow list (connections in allow list are never pruned)
             if is_connection_in_allow_list(connection, self.swarm):
@@ -245,36 +251,43 @@ class ConnectionPruner:
         # Get connection metadata for sorting
         connection_data = []
         for conn in connections:
-            peer_id = None
-            if hasattr(conn, "muxed_conn") and hasattr(conn.muxed_conn, "peer_id"):
+            try:
+                # muxed_conn is a required attribute of INetConn interface
                 peer_id = conn.muxed_conn.peer_id
+            except Exception:
+                peer_id = None
 
             # Get stream count
+            # get_streams() is a required method of INetConn interface
             stream_count = 0
-            streams_attr = getattr(conn, "streams", None)
-            if streams_attr is not None and isinstance(
-                streams_attr, (list, set, tuple)
-            ):
-                stream_count = len(streams_attr)
-            elif hasattr(conn, "get_streams"):
+            try:
+                streams = conn.get_streams()
+                stream_count = len(streams) if streams else 0
+            except Exception:
+                # Fallback: try to access streams attribute if available (SwarmConn specific)
                 try:
-                    streams = conn.get_streams()
-                    stream_count = len(streams) if streams else 0
-                except Exception:
+                    streams_attr = conn.streams  # type: ignore[attr-defined]
+                    if isinstance(streams_attr, (list, set, tuple)):
+                        stream_count = len(streams_attr)
+                except AttributeError:
                     pass
 
             # Get connection age (use creation time if available, otherwise 0)
+            # _created_at is a SwarmConn-specific attribute, not in the interface
             connection_age = 0.0
-            created_at = getattr(conn, "_created_at", None)
-            if created_at is not None and isinstance(created_at, (int, float)):
-                connection_age = float(created_at)
-            elif hasattr(conn, "muxed_conn"):
-                # Try to get from muxed connection
-                muxed_created_at = getattr(conn.muxed_conn, "_created_at", None)
-                if muxed_created_at is not None and isinstance(
-                    muxed_created_at, (int, float)
-                ):
-                    connection_age = float(muxed_created_at)
+            try:
+                # Try to get from connection (SwarmConn has this)
+                created_at = conn._created_at  # type: ignore[attr-defined]
+                if isinstance(created_at, (int, float)):
+                    connection_age = float(created_at)
+            except AttributeError:
+                # Fallback: try to get from muxed connection
+                try:
+                    muxed_created_at = conn.muxed_conn._created_at  # type: ignore[attr-defined]
+                    if isinstance(muxed_created_at, (int, float)):
+                        connection_age = float(muxed_created_at)
+                except AttributeError:
+                    pass
 
             # Get peer value
             peer_value = peer_values.get(peer_id, 0) if peer_id else 0
@@ -283,13 +296,15 @@ class ConnectionPruner:
             # TODO: Get actual direction when available
             direction = 0  # Default to inbound for sorting
 
-            connection_data.append({
-                "conn": conn,
-                "peer_value": peer_value,
-                "stream_count": stream_count,
-                "direction": direction,
-                "age": connection_age,
-            })
+            connection_data.append(
+                {
+                    "conn": conn,
+                    "peer_value": peer_value,
+                    "stream_count": stream_count,
+                    "direction": direction,
+                    "age": connection_age,
+                }
+            )
 
         # Sort by multiple criteria (stable sort, reverse order for each sort)
         # Helper functions to safely get numeric values
