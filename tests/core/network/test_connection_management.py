@@ -4,6 +4,7 @@ Unit tests for connection management components.
 Tests for dial queue, reconnection queue, rate limiter, connection gate,
 address manager, and DNS resolver.
 """
+
 import pytest
 from multiaddr import Multiaddr
 
@@ -191,6 +192,7 @@ class TestAddressManager:
 
     def test_address_manager_custom_sorter(self):
         """Test custom address sorter."""
+
         def reverse_sorter(addresses):
             return list(reversed(addresses))
 
@@ -291,4 +293,3 @@ class TestConnectionConfig:
         )
         assert len(config.allow_list) == 1
         assert len(config.deny_list) == 1
-

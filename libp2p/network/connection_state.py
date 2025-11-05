@@ -6,6 +6,7 @@ matching JavaScript libp2p behavior.
 
 Reference: https://github.com/libp2p/js-libp2p/blob/main/packages/libp2p/src/connection-manager/index.ts
 """
+
 from dataclasses import dataclass, field
 import enum
 import time
@@ -102,4 +103,3 @@ class ConnectionState:
             "status": self.status.value,
             "timeline": self.timeline.to_dict(),
         }
-

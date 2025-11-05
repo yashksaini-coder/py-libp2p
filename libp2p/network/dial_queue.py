@@ -5,6 +5,7 @@ This module provides a priority-based dial queue matching JavaScript libp2p beha
 
 Reference: https://github.com/libp2p/js-libp2p/blob/main/packages/libp2p/src/connection-manager/dial-queue.ts
 """
+
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 import heapq
@@ -140,9 +141,7 @@ class DialQueue:
                 if job.send_channel:
                     try:
                         # Send cancellation - raise Cancelled exception
-                        await job.send_channel.send(
-                            RuntimeError("Queue shutdown")
-                        )
+                        await job.send_channel.send(RuntimeError("Queue shutdown"))
                     except Exception:
                         pass
 
@@ -305,10 +304,7 @@ class DialQueue:
 
             # Start jobs from queue
             async with self._queue_lock:
-                while (
-                    self._queue
-                    and len(self._running_jobs) < self.max_parallel_dials
-                ):
+                while self._queue and len(self._running_jobs) < self.max_parallel_dials:
                     job = heapq.heappop(self._queue)
                     self._running_jobs.add(job)
                     job.running = True
@@ -346,9 +342,7 @@ class DialQueue:
             if job.send_channel:
                 try:
                     # Send cancellation error
-                    await job.send_channel.send(
-                        RuntimeError("Dial job cancelled")
-                    )
+                    await job.send_channel.send(RuntimeError("Dial job cancelled"))
                 except Exception:
                     pass
         except Exception as e:
@@ -403,9 +397,7 @@ class DialQueue:
                         resolved = await self.dns_resolver.resolve(addr)
                         resolved_addrs.extend(resolved)
                     except Exception as e:
-                        logger.debug(
-                            f"DNS resolution failed for {addr}: {e}"
-                        )
+                        logger.debug(f"DNS resolution failed for {addr}: {e}")
                         resolved_addrs.append(addr)
 
                 # Prepare addresses (filter, sort, limit)
@@ -423,9 +415,7 @@ class DialQueue:
                             )
                             return connection
                         except Exception as e:
-                            logger.debug(
-                                f"Dial failed for {addr}: {e}, trying next"
-                            )
+                            logger.debug(f"Dial failed for {addr}: {e}, trying next")
                             continue
             except Exception as e:
                 logger.debug(f"Direct dial failed for {peer_id}: {e}")
@@ -449,9 +439,7 @@ class DialQueue:
 
         for multiaddr in prepared_addrs:
             try:
-                connection = await self.swarm._dial_with_retry(
-                    multiaddr, peer_id
-                )
+                connection = await self.swarm._dial_with_retry(multiaddr, peer_id)
                 return connection
             except Exception as e:
                 logger.debug(f"dial_addr failed for {multiaddr}: {e}")
@@ -466,4 +454,3 @@ class DialQueue:
     def get_running_count(self) -> int:
         """Get number of running dial jobs."""
         return len(self._running_jobs)
-

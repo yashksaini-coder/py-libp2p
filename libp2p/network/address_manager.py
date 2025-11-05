@@ -6,9 +6,11 @@ matching JavaScript libp2p behavior.
 
 Reference: https://github.com/libp2p/js-libp2p/blob/main/packages/libp2p/src/connection-manager/address-sorter.ts
 """
+
+from collections.abc import Callable
 import ipaddress
 import logging
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from multiaddr import Multiaddr
 
@@ -211,14 +213,16 @@ def default_address_sorter(addresses: list[Multiaddr]) -> list[Multiaddr]:
         is_certified = is_certified_address(addr)
         transport_priority = get_transport_priority(addr)
 
-        addr_data.append({
-            "addr": addr,
-            "is_loopback": is_loopback,
-            "is_private": is_private,
-            "is_circuit": is_circuit,
-            "is_certified": is_certified,
-            "transport_priority": transport_priority,
-        })
+        addr_data.append(
+            {
+                "addr": addr,
+                "is_loopback": is_loopback,
+                "is_private": is_private,
+                "is_circuit": is_circuit,
+                "is_certified": is_certified,
+                "transport_priority": transport_priority,
+            }
+        )
 
     # Stable sort in reverse order (last sort is most important)
     # 1. Sort by loopback (loopback last)
@@ -248,9 +252,7 @@ class AddressManager:
 
     def __init__(
         self,
-        address_sorter: (
-            Callable[[list[Multiaddr]], list[Multiaddr]] | None
-        ) = None,
+        address_sorter: (Callable[[list[Multiaddr]], list[Multiaddr]] | None) = None,
         connection_gater: Any | None = None,
     ):
         """
@@ -294,20 +296,15 @@ class AddressManager:
         filtered = []
         for addr in addresses:
             # Check if dialing this multiaddr is allowed
-            if (
-                self.connection_gater is not None
-                and hasattr(self.connection_gater, "deny_dial_multiaddr")
+            if self.connection_gater is not None and hasattr(
+                self.connection_gater, "deny_dial_multiaddr"
             ):
                 try:
                     if self.connection_gater.deny_dial_multiaddr(addr):
-                        logger.debug(
-                            f"Address {addr} denied by connection gater"
-                        )
+                        logger.debug(f"Address {addr} denied by connection gater")
                         continue
                 except Exception as e:
-                    logger.debug(
-                        f"Error checking multiaddr gating: {e}"
-                    )
+                    logger.debug(f"Error checking multiaddr gating: {e}")
                     # On error, allow the address
                     pass
 
@@ -319,14 +316,10 @@ class AddressManager:
             ):
                 try:
                     if self.connection_gater.deny_dial_peer(peer_id):
-                        logger.debug(
-                            f"Peer {peer_id} denied by connection gater"
-                        )
+                        logger.debug(f"Peer {peer_id} denied by connection gater")
                         continue
                 except Exception as e:
-                    logger.debug(
-                        f"Error checking peer gating: {e}"
-                    )
+                    logger.debug(f"Error checking peer gating: {e}")
                     # On error, allow the peer
                     pass
 
@@ -386,4 +379,3 @@ class AddressManager:
             sorted_addrs = sorted_addrs[:max_addresses]
 
         return sorted_addrs
-

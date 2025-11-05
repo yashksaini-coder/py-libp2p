@@ -356,4 +356,3 @@ class ConnectionPruner:
 
         # Extract connections - we know they're INetConn from construction
         return [item["conn"] for item in connection_data]  # type: ignore[misc]
-

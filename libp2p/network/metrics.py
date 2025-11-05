@@ -6,6 +6,7 @@ matching the JavaScript libp2p connection manager metrics.
 
 Reference: https://github.com/libp2p/js-libp2p/blob/main/packages/libp2p/src/connection-manager/index.ts
 """
+
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -231,4 +232,3 @@ def calculate_connection_metrics(
     metrics.update_connection_counts(connections, inbound_pending, outbound_pending)
     metrics.update_stream_metrics(connections)
     return metrics
-

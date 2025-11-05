@@ -6,6 +6,7 @@ multiaddrs, matching JavaScript libp2p behavior.
 
 Reference: https://github.com/libp2p/js-libp2p/blob/main/packages/libp2p/src/connection-manager/resolvers/index.ts
 """
+
 import asyncio
 import logging
 from typing import TYPE_CHECKING
@@ -92,9 +93,7 @@ class DNSResolver:
 
         """
         if depth > self.max_recursion_depth:
-            logger.warning(
-                f"DNS resolution exceeded max depth for {multiaddr}"
-            )
+            logger.warning(f"DNS resolution exceeded max depth for {multiaddr}")
             return [multiaddr]
 
         addr_str = str(multiaddr)
@@ -121,9 +120,7 @@ class DNSResolver:
             try:
                 # Use asyncio.get_event_loop().getaddrinfo for DNS resolution
                 loop = asyncio.get_event_loop()
-                addr_info = await loop.getaddrinfo(
-                    dns_name, None, type=0, proto=0
-                )
+                addr_info = await loop.getaddrinfo(dns_name, None, type=0, proto=0)
 
                 # Replace DNS component with IP addresses
                 for family, _, _, _, sockaddr in addr_info:
@@ -181,16 +178,12 @@ class DNSResolver:
 
         """
         if depth > self.max_recursion_depth:
-            logger.warning(
-                f"DNSADDR resolution exceeded max depth for {multiaddr}"
-            )
+            logger.warning(f"DNSADDR resolution exceeded max depth for {multiaddr}")
             return [multiaddr]
 
         # TODO: Implement full dnsaddr resolution (TXT record lookup)
         # For now, return the original address
-        logger.debug(
-            f"DNSADDR resolution not fully implemented for {multiaddr}"
-        )
+        logger.debug(f"DNSADDR resolution not fully implemented for {multiaddr}")
         return [multiaddr]
 
     def clear_cache(self) -> None:
@@ -218,4 +211,3 @@ async def resolve_multiaddr(multiaddr: Multiaddr) -> list[Multiaddr]:
 
     """
     return await _default_resolver.resolve(multiaddr)
-

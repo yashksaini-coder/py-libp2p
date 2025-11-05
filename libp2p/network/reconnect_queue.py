@@ -6,6 +6,7 @@ matching JavaScript libp2p behavior.
 
 Reference: https://github.com/libp2p/js-libp2p/blob/main/packages/libp2p/src/connection-manager/reconnect-queue.ts
 """
+
 from dataclasses import dataclass
 import logging
 import time
@@ -355,4 +356,3 @@ class ReconnectQueue:
                     )
         except Exception as e:
             logger.error(f"Error reconnecting to KEEP_ALIVE peers: {e}")
-

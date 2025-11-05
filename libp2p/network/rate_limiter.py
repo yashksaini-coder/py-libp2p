@@ -6,6 +6,7 @@ abuse and resource exhaustion, matching JavaScript libp2p behavior.
 
 Reference: https://github.com/libp2p/js-libp2p/blob/main/packages/utils/src/rate-limiter.ts
 """
+
 from collections import defaultdict
 import logging
 import time
@@ -112,9 +113,7 @@ class RateLimiter:
         # Clean up old entries (outside duration window)
         window_start = now - self.duration
         records = self._storage[key]
-        records[:] = [
-            (ts, pts) for ts, pts in records if ts > window_start
-        ]
+        records[:] = [(ts, pts) for ts, pts in records if ts > window_start]
 
         # Calculate current consumption
         consumed_points = sum(pts for _, pts in records)
@@ -229,4 +228,3 @@ class ConnectionRateLimiter:
 
         """
         self._limiter.reset(host)
-

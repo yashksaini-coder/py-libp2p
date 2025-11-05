@@ -3,6 +3,7 @@ Configuration constants matching JavaScript libp2p connection manager defaults.
 
 Reference: https://github.com/libp2p/js-libp2p/blob/main/packages/libp2p/src/connection-manager/constants.ts
 """
+
 from collections.abc import (
     Callable,
 )

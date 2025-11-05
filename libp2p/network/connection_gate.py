@@ -6,6 +6,7 @@ matching JavaScript libp2p behavior.
 
 Reference: https://github.com/libp2p/js-libp2p/blob/main/packages/libp2p/src/connection-manager/index.ts
 """
+
 import ipaddress
 import logging
 from typing import TYPE_CHECKING
@@ -185,8 +186,7 @@ class ConnectionGate:
         # Check if IP is private and private addresses are not allowed
         if not self.allow_private_addresses and ip.is_private:
             logger.debug(
-                f"Private IP address {ip_str} denied "
-                "(private addresses not allowed)"
+                f"Private IP address {ip_str} denied (private addresses not allowed)"
             )
             return False
 
@@ -303,4 +303,3 @@ class ConnectionGate:
             logger.debug(f"Removed {entry} from deny list")
         except ValueError as e:
             logger.warning(f"Invalid deny list entry '{entry}': {e}")
-
