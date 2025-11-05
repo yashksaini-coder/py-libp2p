@@ -338,19 +338,40 @@ class Swarm(Service, INetworkService):
 
         logger.debug("attempting to dial peer %s", peer_id)
 
-        # Use dial queue for connection management
+        # Use dial queue for connection management if it's started
         # The dial queue handles address resolution, sorting, DNS, and concurrency
-        try:
-            connection = await self.dial_queue.dial(peer_id)
-            # dial_queue.dial returns a single connection, but we need to return a list
-            # Check if we got a connection
-            if connection:
-                return [connection]
-            else:
-                raise SwarmException(f"Failed to establish connection to {peer_id}")
-        except Exception as e:
-            # If dial queue fails, fall back to direct dialing for backward compatibility
-            logger.debug(f"Dial queue failed, falling back to direct dial: {e}")
+        if self.dial_queue._started:
+            try:
+                connection = await self.dial_queue.dial(peer_id)
+                # dial_queue.dial returns a single connection, but we need to return a list
+                if connection:
+                    return [connection]
+                else:
+                    raise SwarmException(f"Failed to establish connection to {peer_id}")
+            except RuntimeError as e:
+                # RuntimeError from dial queue (queue full, not started, etc.)
+                # Only fall back if it's a recoverable error
+                error_msg = str(e)
+                if "not started" in error_msg.lower():
+                    # Queue not started - use direct dialing
+                    logger.debug(f"Dial queue not started, using direct dial: {e}")
+                    return await self._dial_peer_direct(peer_id)
+                elif "queue is full" in error_msg.lower():
+                    # Queue full - fall back to direct dialing
+                    logger.debug(f"Dial queue full, using direct dial: {e}")
+                    return await self._dial_peer_direct(peer_id)
+                else:
+                    # Other RuntimeErrors should be re-raised or fall back
+                    logger.debug(f"Dial queue RuntimeError: {e}, falling back to direct dial")
+                    return await self._dial_peer_direct(peer_id)
+            except (SwarmException, Exception) as e:
+                # For other exceptions (connection failures, etc.), check if it's a connection error
+                # If dial queue failed completely, fall back to direct dialing
+                logger.debug(f"Dial queue failed with {type(e).__name__}: {e}, falling back to direct dial")
+                return await self._dial_peer_direct(peer_id)
+        else:
+            # Dial queue not started - use direct dialing
+            logger.debug("Dial queue not started, using direct dialing")
             return await self._dial_peer_direct(peer_id)
 
     async def _dial_peer_direct(self, peer_id: ID) -> list[INetConn]:
@@ -485,6 +506,7 @@ class Swarm(Service, INetworkService):
 
         # Dial peer (connection to peer does not yet exist)
         # Transport dials peer (gets back a raw conn)
+        raw_conn = None
         try:
             addr = Multiaddr(f"{addr}/p2p/{peer_id}")
             raw_conn = await self.transport.dial(addr)
@@ -493,12 +515,22 @@ class Swarm(Service, INetworkService):
             # Release pre-upgrade scope on failure
             try:
                 if pre_scope is not None and hasattr(pre_scope, "close"):
-                    pre_scope.close()  
+                    pre_scope.close()
             except Exception:
                 pass
             raise SwarmException(
                 f"fail to open connection to peer {peer_id}"
             ) from error
+        except Exception as e:
+            # Clean up on any unexpected exception during dial
+            try:
+                if pre_scope is not None and hasattr(pre_scope, "close"):
+                    pre_scope.close()
+            except Exception:
+                pass
+            raise SwarmException(
+                f"Unexpected error dialing peer {peer_id}"
+            ) from e
 
         if isinstance(self.transport, QUICTransport) and isinstance(
             raw_conn, IMuxedConn
@@ -506,11 +538,32 @@ class Swarm(Service, INetworkService):
             logger.info(
                 "Skipping upgrade for QUIC, QUIC connections are already multiplexed"
             )
-            swarm_conn = await self.add_conn(raw_conn)
-            return swarm_conn
+            try:
+                swarm_conn = await self.add_conn(raw_conn)
+                return swarm_conn
+            except Exception as e:
+                # Clean up on failure
+                try:
+                    await raw_conn.close()
+                except Exception:
+                    pass
+                try:
+                    if pre_scope is not None and hasattr(pre_scope, "close"):
+                        pre_scope.close()
+                except Exception:
+                    pass
+                raise
 
         logger.debug("dialed peer %s over base transport", peer_id)
-        swarm_conn = await self.upgrade_outbound_raw_conn(raw_conn, peer_id, pre_scope)
+        try:
+            swarm_conn = await self.upgrade_outbound_raw_conn(raw_conn, peer_id, pre_scope)
+        except Exception as e:
+            # Ensure raw_conn is closed if upgrade fails
+            try:
+                await raw_conn.close()
+            except Exception:
+                pass
+            raise
 
         logger.debug("successfully dialed peer %s", peer_id)
 
@@ -524,28 +577,68 @@ class Swarm(Service, INetworkService):
 
         :param raw_conn: the raw connection to upgrade
         :param peer_id: the peer this connection is to
+        :param pre_scope: pre-upgrade resource scope (if any)
         :raises SwarmException: raised when security or muxer upgrade fails
         :return: network connection with security and multiplexing established
         """
-        # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
-        # the conn and then mux the conn
+        secured_conn = None
         try:
-            secured_conn = await self.upgrader.upgrade_security(raw_conn, True, peer_id)
-        except SecurityUpgradeFailure as error:
-            logger.debug("failed to upgrade security for peer %s", peer_id)
-            await raw_conn.close()
-            raise SwarmException(
-                f"failed to upgrade security for peer {peer_id}"
-            ) from error
+            # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
+            # the conn and then mux the conn
+            try:
+                secured_conn = await self.upgrader.upgrade_security(raw_conn, True, peer_id)
+            except SecurityUpgradeFailure as error:
+                logger.debug("failed to upgrade security for peer %s", peer_id)
+                # Clean up raw connection
+                try:
+                    await raw_conn.close()
+                except Exception:
+                    pass
+                # Clean up pre-scope
+                try:
+                    if pre_scope is not None and hasattr(pre_scope, "close"):
+                        pre_scope.close()
+                except Exception:
+                    pass
+                raise SwarmException(
+                    f"failed to upgrade security for peer {peer_id}"
+                ) from error
 
-        logger.debug("upgraded security for peer %s", peer_id)
+            logger.debug("upgraded security for peer %s", peer_id)
 
-        try:
-            muxed_conn = await self.upgrader.upgrade_connection(secured_conn, peer_id)
-        except MuxerUpgradeFailure as error:
-            logger.debug("failed to upgrade mux for peer %s", peer_id)
-            await secured_conn.close()
-            raise SwarmException(f"failed to upgrade mux for peer {peer_id}") from error
+            try:
+                muxed_conn = await self.upgrader.upgrade_connection(secured_conn, peer_id)
+            except MuxerUpgradeFailure as error:
+                logger.debug("failed to upgrade mux for peer %s", peer_id)
+                # Clean up secured connection
+                try:
+                    await secured_conn.close()
+                except Exception:
+                    pass
+                # Clean up pre-scope
+                try:
+                    if pre_scope is not None and hasattr(pre_scope, "close"):
+                        pre_scope.close()
+                except Exception:
+                    pass
+                raise SwarmException(f"failed to upgrade mux for peer {peer_id}") from error
+        except Exception:
+            # Ensure cleanup on any unexpected exception
+            if secured_conn is not None:
+                try:
+                    await secured_conn.close()
+                except Exception:
+                    pass
+            try:
+                await raw_conn.close()
+            except Exception:
+                pass
+            try:
+                if pre_scope is not None and hasattr(pre_scope, "close"):
+                    pre_scope.close()
+            except Exception:
+                pass
+            raise
 
         logger.debug("upgraded mux for peer %s", peer_id)
 
@@ -565,7 +658,7 @@ class Swarm(Service, INetworkService):
                     # Release pre-upgrade scope
                     try:
                         if pre_scope is not None and hasattr(pre_scope, "close"):
-                            pre_scope.close()  
+                            pre_scope.close()
                             pre_scope = None
                     except Exception:
                         pass
@@ -577,7 +670,7 @@ class Swarm(Service, INetworkService):
                 # Release pre-upgrade scope after acquiring real scope
                 try:
                     if pre_scope is not None and hasattr(pre_scope, "close"):
-                        pre_scope.close()  
+                        pre_scope.close()
                         pre_scope = None
                 except Exception:
                     pass
@@ -884,11 +977,27 @@ class Swarm(Service, INetworkService):
                         await read_write_closer.close()
                     return
 
-                raw_conn = RawConnection(read_write_closer, False)
-                await self.upgrade_inbound_raw_conn(raw_conn, maddr)
-                # NOTE: This is a intentional barrier to prevent from the handler
-                # exiting and closing the connection.
-                await self.manager.wait_finished()
+                # For non-QUIC connections, wrap in try/except to ensure cleanup
+                raw_conn = None
+                try:
+                    raw_conn = RawConnection(read_write_closer, False)
+                    await self.upgrade_inbound_raw_conn(raw_conn, maddr)
+                    # NOTE: This is a intentional barrier to prevent from the handler
+                    # exiting and closing the connection.
+                    await self.manager.wait_finished()
+                except Exception as e:
+                    logger.debug(f"Error handling incoming connection: {e}")
+                    # Ensure the underlying connection is closed on any error
+                    try:
+                        if raw_conn is not None:
+                            await raw_conn.close()
+                        else:
+                            # If raw_conn wasn't created, close the underlying connection
+                            await read_write_closer.close()
+                    except Exception:
+                        pass
+                    # Re-raise to let the listener handle it appropriately
+                    # (swallow the exception to prevent propagation)
 
             try:
                 # Success
@@ -984,24 +1093,6 @@ class Swarm(Service, INetworkService):
                     await raw_conn.close()
                     raise SwarmException("Rate limit exceeded for incoming connection")
 
-        # secure the conn and then mux the conn
-        try:
-            secured_conn = await self.upgrader.upgrade_security(raw_conn, False)
-        except SecurityUpgradeFailure as error:
-            logger.error("failed to upgrade security for peer at %s", maddr)
-            await raw_conn.close()
-            raise SwarmException(
-                f"failed to upgrade security for peer at {maddr}"
-            ) from error
-        peer_id = secured_conn.get_remote_peer()
-
-        try:
-            muxed_conn = await self.upgrader.upgrade_connection(secured_conn, peer_id)
-        except MuxerUpgradeFailure as error:
-            logger.error("fail to upgrade mux for peer %s", peer_id)
-            await secured_conn.close()
-            raise SwarmException(f"fail to upgrade mux for peer {peer_id}") from error
-        logger.debug("upgraded mux for peer %s", peer_id)
         # Optional pre-upgrade admission using ResourceManager
         pre_scope = None
         if self._resource_manager is not None:
@@ -1022,6 +1113,76 @@ class Swarm(Service, INetworkService):
             except Exception:
                 # Fail-open on admission errors; guard later in add_conn
                 pre_scope = None
+
+        # secure the conn and then mux the conn
+        secured_conn = None
+        muxed_conn = None
+        try:
+            try:
+                secured_conn = await self.upgrader.upgrade_security(raw_conn, False)
+            except SecurityUpgradeFailure as error:
+                logger.error("failed to upgrade security for peer at %s", maddr)
+                # Clean up raw connection
+                try:
+                    await raw_conn.close()
+                except Exception:
+                    pass
+                # Clean up pre-scope
+                try:
+                    if pre_scope is not None and hasattr(pre_scope, "close"):
+                        pre_scope.close()
+                except Exception:
+                    pass
+                raise SwarmException(
+                    f"failed to upgrade security for peer at {maddr}"
+                ) from error
+            peer_id = secured_conn.get_remote_peer()
+
+            try:
+                muxed_conn = await self.upgrader.upgrade_connection(secured_conn, peer_id)
+            except MuxerUpgradeFailure as error:
+                logger.error("fail to upgrade mux for peer %s", peer_id)
+                # Clean up secured connection
+                try:
+                    await secured_conn.close()
+                except Exception:
+                    pass
+                # Clean up raw connection
+                try:
+                    await raw_conn.close()
+                except Exception:
+                    pass
+                # Clean up pre-scope
+                try:
+                    if pre_scope is not None and hasattr(pre_scope, "close"):
+                        pre_scope.close()
+                except Exception:
+                    pass
+                raise SwarmException(f"fail to upgrade mux for peer {peer_id}") from error
+            logger.debug("upgraded mux for peer %s", peer_id)
+        except Exception:
+            # Ensure cleanup on any unexpected exception
+            if muxed_conn is not None:
+                try:
+                    await muxed_conn.close()
+                except Exception:
+                    pass
+            if secured_conn is not None:
+                try:
+                    await secured_conn.close()
+                except Exception:
+                    pass
+            try:
+                await raw_conn.close()
+            except Exception:
+                pass
+            # Clean up pre-scope
+            try:
+                if pre_scope is not None and hasattr(pre_scope, "close"):
+                    pre_scope.close()
+            except Exception:
+                pass
+            raise
         # Pass endpoint IP to resource manager, if available
         if self._resource_manager is not None:
             try:
@@ -1035,7 +1196,21 @@ class Swarm(Service, INetworkService):
                     peer_id, endpoint_ip=ep
                 )
                 if conn_scope is None:
-                    await secured_conn.close()
+                    # Clean up connections
+                    try:
+                        await secured_conn.close()
+                    except Exception:
+                        pass
+                    try:
+                        await raw_conn.close()
+                    except Exception:
+                        pass
+                    # Clean up pre-scope
+                    try:
+                        if pre_scope is not None and hasattr(pre_scope, "close"):
+                            pre_scope.close()
+                    except Exception:
+                        pass
                     raise SwarmException("Connection denied by resource manager")
                 # Store on muxed_conn if possible for cleanup propagation
                 try:
@@ -1045,10 +1220,13 @@ class Swarm(Service, INetworkService):
                 # Release any pre-upgrade scope now that we have a real scope
                 try:
                     if pre_scope is not None and hasattr(pre_scope, "close"):
-                        pre_scope.close()  
+                        pre_scope.close()
                         pre_scope = None
                 except Exception:
                     pass
+            except SwarmException:
+                # Re-raise SwarmExceptions (connection denied)
+                raise
             except Exception:
                 # Let add_conn perform final guard if needed
                 pass
