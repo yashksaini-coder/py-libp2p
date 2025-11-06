@@ -586,14 +586,20 @@ async def test_all_peers_receive_identify_push_with_semaphore_under_high_peer_lo
             network = host_a.get_network()
             if hasattr(network, "connection_config"):
                 # Increase connection limits
+                # pyrefly: ignore
                 network.connection_config.max_connections = 600  # Well above 499
+                # pyrefly: ignore
                 network.connection_config.max_parallel_dials = (
                     200  # Increase parallel dials
                 )
+                # pyrefly: ignore
                 network.connection_config.dial_timeout = 30.0  # Increase dial timeout
+                # pyrefly: ignore
                 network.connection_config.max_dial_queue_length = 1000  # Increase queue
                 logger.info(
-                    f"Configured host_a connection limits: max_connections={network.connection_config.max_connections}"
+                    f"Configured host_a connection limits: "
+                    # pyrefly: ignore
+                    f"max_connections={network.connection_config.max_connections}"
                 )
 
             # Connect host_a → dummy peers in batches to avoid overwhelming the system
@@ -618,14 +624,17 @@ async def test_all_peers_receive_identify_push_with_semaphore_under_high_peer_lo
                                 await trio.sleep(wait_time)
                             else:
                                 logger.warning(
-                                    f"Failed to connect to peer {host.get_id()} after {max_retries} attempts: {e}"
+                                    f"Failed to connect to peer {host.get_id()} "
+                                    f"after {max_retries} attempts: {e}"
                                 )
 
-            # Start all connections in parallel with concurrency limit using existing nursery
+            # Start all connections in parallel with concurrency limit
+            # using existing nursery
             for host, listen_addr in dummy_peers:
                 nursery.start_soon(connect_to_peer, host, listen_addr)
 
-            # Give connections time to start (with 499 peers and 50 concurrent, this takes less time)
+            # Give connections time to start
+            # (with 499 peers and 50 concurrent, this takes less time)
             # Estimate: 499 peers / 50 concurrent = ~10 batches
             await trio.sleep(5.0)  # Increased from 2.0 to 5.0
 
@@ -654,8 +663,10 @@ async def test_all_peers_receive_identify_push_with_semaphore_under_high_peer_lo
             if not expected_peer_ids.issubset(connected_peers):
                 missing = expected_peer_ids - connected_peers
                 raise AssertionError(
-                    f"Failed to connect to {len(missing)} out of {len(expected_peer_ids)} peers. "
-                    f"Missing peers: {list(missing)[:10]}{'...' if len(missing) > 10 else ''}"
+                    f"Failed to connect to {len(missing)} out of "
+                    f"{len(expected_peer_ids)} peers. "
+                    f"Missing peers: {list(missing)[:10]}"
+                    f"{'...' if len(missing) > 10 else ''}"
                 )
 
             logger.info(
@@ -703,7 +714,8 @@ async def test_all_peers_receive_identify_push_with_semaphore_under_high_peer_lo
 
             if failed_peers:
                 raise AssertionError(
-                    f"{len(failed_peers)} connected peer(s) did not receive identify push from {peer_id_a}: "
+                    f"{len(failed_peers)} connected peer(s) did not receive "
+                    f"identify push from {peer_id_a}: "
                     f"{failed_peers[:10]}{'...' if len(failed_peers) > 10 else ''}"
                 )
 
