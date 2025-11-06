@@ -113,4 +113,3 @@ async def test_connection_state_object() -> None:
     assert "status" in state_dict
     assert "timeline" in state_dict
     assert state_dict["status"] == "open"
-

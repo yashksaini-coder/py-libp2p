@@ -140,4 +140,3 @@ async def test_connection_gate_integration() -> None:
     assert connection_config.deny_list
 
     await swarm.close()
-

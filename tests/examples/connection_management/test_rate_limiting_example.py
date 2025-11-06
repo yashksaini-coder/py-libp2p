@@ -87,4 +87,3 @@ async def test_rate_limit_validation() -> None:
     # High threshold
     config = ConnectionConfig(inbound_connection_threshold=100)
     assert config.inbound_connection_threshold == 100
-

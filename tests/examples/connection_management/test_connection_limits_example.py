@@ -110,4 +110,3 @@ async def test_connection_limit_exceeded_config() -> None:
     assert connection_config.max_incoming_pending_connections == 1
 
     await swarm.close()
-

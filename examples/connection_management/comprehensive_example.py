@@ -36,10 +36,8 @@ async def example_production_configuration() -> None:
         max_parallel_dials=100,
         max_dial_queue_length=500,
         max_incoming_pending_connections=10,
-
         # Rate limiting
         inbound_connection_threshold=5,  # 5 connections/sec per host
-
         # Security - allow/deny lists
         allow_list=[
             "10.0.0.0/8",  # Internal network
@@ -48,12 +46,10 @@ async def example_production_configuration() -> None:
         deny_list=[
             # Add known malicious IPs here
         ],
-
         # Timeouts
         dial_timeout=10.0,
         connection_close_timeout=1.0,
         inbound_upgrade_timeout=10.0,
-
         # Reconnection
         reconnect_retries=5,
         reconnect_retry_interval=1.0,
@@ -224,4 +220,3 @@ async def main() -> None:
 
 if __name__ == "__main__":
     trio.run(main)
-

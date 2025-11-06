@@ -153,4 +153,3 @@ async def test_best_practices_validation() -> None:
 
     swarm = new_swarm(connection_config=good_config)
     await swarm.close()
-
