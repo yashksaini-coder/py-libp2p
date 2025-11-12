@@ -115,7 +115,6 @@ class SwarmConn(INetConn):
                     else:
                         # Synchronous close
                         close_method()
-                    self._resource_scope.close()
                 elif hasattr(self._resource_scope, "release"):
                     release_method = getattr(self._resource_scope, "release")
                     if inspect.iscoroutinefunction(release_method):
