@@ -1070,11 +1070,7 @@ class Swarm(Service, INetworkService):
         # Enable PNET is psk is provided
         if self.psk is not None:
             raw_conn = new_protected_conn(raw_conn, self.psk)
-        # secure the conn and then mux the conn
-        try:
-            secured_conn = await self.upgrader.upgrade_security(raw_conn, False)
-        except SecurityUpgradeFailure as error:
-            logger.error("failed to upgrade security for peer at %s", maddr)
+        
         # Check pending incoming connections limit
         # Note: We can't easily track pending connections here,
         # but this is a best-effort check
