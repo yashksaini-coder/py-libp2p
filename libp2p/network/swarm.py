@@ -1066,11 +1066,11 @@ class Swarm(Service, INetworkService):
             )
             await raw_conn.close()
             raise SwarmException("Maximum connections limit reached")
-        
+
         # Enable PNET is psk is provided
         if self.psk is not None:
             raw_conn = new_protected_conn(raw_conn, self.psk)
-        
+
         # Check pending incoming connections limit
         # Note: We can't easily track pending connections here,
         # but this is a best-effort check
