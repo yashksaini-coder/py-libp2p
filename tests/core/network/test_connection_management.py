@@ -220,13 +220,13 @@ class TestAddressManager:
 class TestDNSResolver:
     """Test DNS resolver functionality."""
 
-    @pytest.mark.asyncio
+    @pytest.mark.trio
     async def test_dns_resolver_initialization(self):
         """Test DNS resolver initialization."""
         resolver = DNSResolver(max_recursion_depth=32)
         assert resolver.max_recursion_depth == 32
 
-    @pytest.mark.asyncio
+    @pytest.mark.trio
     async def test_dns_resolver_non_dns_address(self):
         """Test resolver with non-DNS address."""
         resolver = DNSResolver()
@@ -237,7 +237,7 @@ class TestDNSResolver:
         assert len(resolved) == 1
         assert resolved[0] == addr
 
-    @pytest.mark.asyncio
+    @pytest.mark.trio
     async def test_dns_resolver_cache(self):
         """Test DNS resolver caching."""
         resolver = DNSResolver()
@@ -250,7 +250,7 @@ class TestDNSResolver:
 
         assert resolved1 == resolved2
 
-    @pytest.mark.asyncio
+    @pytest.mark.trio
     async def test_dns_resolver_clear_cache(self):
         """Test clearing DNS cache."""
         resolver = DNSResolver()
