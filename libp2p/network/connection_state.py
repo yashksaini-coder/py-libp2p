@@ -65,11 +65,12 @@ class ConnectionState:
     """
     Connection state tracking for libp2p connections.
 
-    Tracks status and timeline information matching JS libp2p.
+    Tracks status, timeline, and direction information matching JS libp2p.
     """
 
     status: ConnectionStatus = ConnectionStatus.PENDING
     timeline: ConnectionTimeline = field(default_factory=ConnectionTimeline)
+    direction: str = "unknown"  # "inbound" or "outbound"
 
     def set_status(self, status: ConnectionStatus) -> None:
         """
@@ -102,4 +103,5 @@ class ConnectionState:
         return {
             "status": self.status.value,
             "timeline": self.timeline.to_dict(),
+            "direction": self.direction,
         }

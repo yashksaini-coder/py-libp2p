@@ -43,6 +43,7 @@ class SwarmConn(INetConn):
         self,
         muxed_conn: IMuxedConn,
         swarm: "Swarm",
+        direction: str = "unknown",
     ) -> None:
         self.muxed_conn = muxed_conn
         self.swarm = swarm
@@ -52,6 +53,8 @@ class SwarmConn(INetConn):
         # Track connection creation time for pruning
         self._created_at = time.time()
         self._resource_scope = None
+        # Track connection direction (inbound/outbound)
+        self.direction = direction
         # Provide back-references/hooks expected by NetStream
         try:
             setattr(self.muxed_conn, "swarm", self.swarm)

@@ -24,6 +24,7 @@ MAX_INCOMING_PENDING_CONNECTIONS = 10
 DIAL_TIMEOUT = 10.0  # 10_000ms
 CONNECTION_CLOSE_TIMEOUT = 1.0  # 1_000ms
 INBOUND_UPGRADE_TIMEOUT = 10.0  # 10_000ms
+OUTBOUND_UPGRADE_TIMEOUT = 10.0  # 10_000ms
 OUTBOUND_STREAM_PROTOCOL_NEGOTIATION_TIMEOUT = 10.0  # 10_000ms
 INBOUND_STREAM_PROTOCOL_NEGOTIATION_TIMEOUT = 10.0  # 10_000ms
 
@@ -94,6 +95,8 @@ class ConnectionConfig:
                                  Default: 1.0
         inbound_upgrade_timeout: Timeout in seconds for inbound connection upgrades.
                                 Default: 10.0
+        outbound_upgrade_timeout: Timeout in seconds for outbound connection upgrades
+                                 (security and muxer negotiation). Default: 10.0
         outbound_stream_protocol_negotiation_timeout: Timeout in seconds for
             outbound stream protocol negotiation. Default: 10.0
         inbound_stream_protocol_negotiation_timeout: Timeout in seconds for
@@ -135,6 +138,7 @@ class ConnectionConfig:
     dial_timeout: float = DIAL_TIMEOUT
     connection_close_timeout: float = CONNECTION_CLOSE_TIMEOUT
     inbound_upgrade_timeout: float = INBOUND_UPGRADE_TIMEOUT
+    outbound_upgrade_timeout: float = OUTBOUND_UPGRADE_TIMEOUT
     outbound_stream_protocol_negotiation_timeout: float = (
         OUTBOUND_STREAM_PROTOCOL_NEGOTIATION_TIMEOUT
     )
@@ -184,6 +188,12 @@ class ConnectionConfig:
 
         if self.dial_timeout < 0:
             raise ValueError("Dial timeout should be positive")
+
+        if self.inbound_upgrade_timeout < 0:
+            raise ValueError("Inbound upgrade timeout should be positive")
+
+        if self.outbound_upgrade_timeout < 0:
+            raise ValueError("Outbound upgrade timeout should be positive")
 
         if self.connection_timeout < 0:
             raise ValueError("Connection timeout should be positive")

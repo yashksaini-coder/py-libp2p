@@ -37,6 +37,10 @@ from libp2p.network.connection_gate import ConnectionGate
 from libp2p.network.connection_pruner import ConnectionPruner
 from libp2p.network.dial_queue import DialQueue
 from libp2p.network.dns_resolver import DNSResolver
+from libp2p.network.metrics import (
+    ConnectionMetrics,
+    calculate_connection_metrics,
+)
 from libp2p.network.rate_limiter import ConnectionRateLimiter
 from libp2p.network.reconnect_queue import ReconnectQueue
 from libp2p.peer.id import (
@@ -319,6 +323,26 @@ class Swarm(Service, INetworkService):
         conns = self.get_connections(peer_id)
         return conns[0] if conns else None
 
+    def get_metrics(self) -> ConnectionMetrics:
+        """
+        Get connection metrics including 90th percentile stream statistics.
+
+        Returns
+        -------
+        ConnectionMetrics
+            Connection metrics object with counts, pending connections,
+            protocol streams, and 90th percentile statistics.
+
+        """
+        # Calculate metrics on-demand (matching JS libp2p behavior)
+        # Note: Pending connections tracking would need to be implemented
+        # in dial_queue and reconnect_queue for accurate counts
+        return calculate_connection_metrics(
+            self.connections,
+            inbound_pending=0,  # TODO: Track pending inbound connections
+            outbound_pending=0,  # TODO: Track pending outbound connections
+        )
+
     async def dial_peer(self, peer_id: ID) -> list[INetConn]:
         """
         Try to create connections to peer_id using dial queue.
@@ -551,7 +575,7 @@ class Swarm(Service, INetworkService):
                 "Skipping upgrade for QUIC, QUIC connections are already multiplexed"
             )
             try:
-                swarm_conn = await self.add_conn(raw_conn)
+                swarm_conn = await self.add_conn(raw_conn, direction="outbound")
                 return swarm_conn
             except Exception:
                 # Clean up on failure
@@ -600,8 +624,30 @@ class Swarm(Service, INetworkService):
             # Per, https://discuss.libp2p.io/t/multistream-security/130, we first secure
             # the conn and then mux the conn
             try:
-                secured_conn = await self.upgrader.upgrade_security(
-                    raw_conn, True, peer_id
+                # Apply outbound upgrade timeout
+                with trio.fail_after(self.connection_config.outbound_upgrade_timeout):
+                    secured_conn = await self.upgrader.upgrade_security(
+                        raw_conn, True, peer_id
+                    )
+            except trio.TooSlowError:
+                timeout_val = self.connection_config.outbound_upgrade_timeout
+                logger.debug(
+                    f"Outbound upgrade timeout ({timeout_val}s) "
+                    f"exceeded for peer {peer_id}"
+                )
+                # Clean up raw connection
+                try:
+                    await raw_conn.close()
+                except Exception:
+                    pass
+                # Clean up pre-scope
+                try:
+                    if pre_scope is not None and hasattr(pre_scope, "close"):
+                        pre_scope.close()
+                except Exception:
+                    pass
+                raise SwarmException(
+                    f"Outbound upgrade timeout exceeded for peer {peer_id}"
                 )
             except SecurityUpgradeFailure as error:
                 logger.debug("failed to upgrade security for peer %s", peer_id)
@@ -623,8 +669,30 @@ class Swarm(Service, INetworkService):
             logger.debug("upgraded security for peer %s", peer_id)
 
             try:
-                muxed_conn = await self.upgrader.upgrade_connection(
-                    secured_conn, peer_id
+                # Apply outbound upgrade timeout for muxer upgrade
+                with trio.fail_after(self.connection_config.outbound_upgrade_timeout):
+                    muxed_conn = await self.upgrader.upgrade_connection(
+                        secured_conn, peer_id
+                    )
+            except trio.TooSlowError:
+                timeout_val = self.connection_config.outbound_upgrade_timeout
+                logger.debug(
+                    f"Outbound muxer upgrade timeout ({timeout_val}s) "
+                    f"exceeded for peer {peer_id}"
+                )
+                # Clean up secured connection
+                try:
+                    await secured_conn.close()
+                except Exception:
+                    pass
+                # Clean up pre-scope
+                try:
+                    if pre_scope is not None and hasattr(pre_scope, "close"):
+                        pre_scope.close()
+                except Exception:
+                    pass
+                raise SwarmException(
+                    f"Outbound muxer upgrade timeout exceeded for peer {peer_id}"
                 )
             except MuxerUpgradeFailure as error:
                 logger.debug("failed to upgrade mux for peer %s", peer_id)
@@ -697,7 +765,7 @@ class Swarm(Service, INetworkService):
             except Exception:
                 pass
 
-        swarm_conn = await self.add_conn(muxed_conn)
+        swarm_conn = await self.add_conn(muxed_conn, direction="outbound")
         logger.debug("successfully dialed peer %s", peer_id)
         return swarm_conn
 
@@ -985,7 +1053,7 @@ class Swarm(Service, INetworkService):
                 if isinstance(self.transport, QUICTransport):
                     try:
                         quic_conn = cast(QUICConnection, read_write_closer)
-                        await self.add_conn(quic_conn)
+                        await self.add_conn(quic_conn, direction="inbound")
                         peer_id = quic_conn.peer_id
                         logger.debug(
                             f"successfully opened quic connection to peer {peer_id}"
@@ -1264,7 +1332,7 @@ class Swarm(Service, INetworkService):
                 # Let add_conn perform final guard if needed
                 pass
 
-        await self.add_conn(muxed_conn)
+        await self.add_conn(muxed_conn, direction="inbound")
         logger.debug("successfully opened connection to peer %s", peer_id)
 
         return muxed_conn
@@ -1344,11 +1412,21 @@ class Swarm(Service, INetworkService):
 
         logger.debug("successfully close the connection to peer %s", peer_id)
 
-    async def add_conn(self, muxed_conn: IMuxedConn) -> "SwarmConn":
+    async def add_conn(
+        self, muxed_conn: IMuxedConn, direction: str = "unknown"
+    ) -> "SwarmConn":
         """
         Add a `IMuxedConn` to `Swarm` as a `SwarmConn`, notify "connected",
         and start to monitor the connection for its new streams and
         disconnection.
+
+        Parameters
+        ----------
+        muxed_conn : IMuxedConn
+            The muxed connection to add
+        direction : str
+            Connection direction: "inbound" or "outbound". Default: "unknown"
+
         """
         # Apply resource manager checks to ALL connection types (TCP, WebSocket, QUIC)
         conn_scope = None
@@ -1383,6 +1461,7 @@ class Swarm(Service, INetworkService):
         swarm_conn = SwarmConn(
             muxed_conn,
             self,
+            direction=direction,
         )
 
         # For non-QUIC connections, set the resource scope on SwarmConn
