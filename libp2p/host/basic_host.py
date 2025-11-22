@@ -286,10 +286,11 @@ class BasicHost(IHost):
         # Perform protocol muxing to determine protocol to use
         # Use ConnectionConfig timeout if available (outbound stream negotiation)
         negotiate_timeout = self.negotiate_timeout
-        if hasattr(self._network, "connection_config"):
+        connection_config = getattr(self._network, "connection_config", None)
+        if connection_config is not None:
             # Convert float seconds to int for negotiate_timeout parameter
             config_timeout = int(
-                self._network.connection_config.outbound_stream_protocol_negotiation_timeout
+                connection_config.outbound_stream_protocol_negotiation_timeout
             )
             if config_timeout > 0:
                 negotiate_timeout = config_timeout
@@ -366,10 +367,11 @@ class BasicHost(IHost):
         # Perform protocol muxing to determine protocol to use
         # Use ConnectionConfig timeout if available (inbound stream negotiation)
         negotiate_timeout = self.negotiate_timeout
-        if hasattr(self._network, "connection_config"):
+        connection_config = getattr(self._network, "connection_config", None)
+        if connection_config is not None:
             # Convert float seconds to int for negotiate_timeout parameter
             config_timeout = int(
-                self._network.connection_config.inbound_stream_protocol_negotiation_timeout
+                connection_config.inbound_stream_protocol_negotiation_timeout
             )
             if config_timeout > 0:
                 negotiate_timeout = config_timeout
