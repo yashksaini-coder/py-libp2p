@@ -24,6 +24,8 @@ def extract_ip_from_multiaddr(addr: Multiaddr) -> str | None:
     """
     Extract the IP address from a multiaddr.
 
+    Uses multiaddr's value_for_protocol method to extract IP addresses.
+
     Parameters
     ----------
     addr : Multiaddr
@@ -35,21 +37,19 @@ def extract_ip_from_multiaddr(addr: Multiaddr) -> str | None:
         IP address or None if not found
 
     """
-    addr_str = str(addr)
+    from multiaddr.exceptions import ProtocolLookupError
 
-    # Look for IPv4 address
-    ipv4_start = addr_str.find("/ip4/")
-    if ipv4_start != -1:
-        ipv4_end = addr_str.find("/", ipv4_start + 5)
-        if ipv4_end != -1:
-            return addr_str[ipv4_start + 5 : ipv4_end]
+    # Try IPv4 first
+    try:
+        return addr.value_for_protocol("ip4")
+    except ProtocolLookupError:
+        pass
 
-    # Look for IPv6 address
-    ipv6_start = addr_str.find("/ip6/")
-    if ipv6_start != -1:
-        ipv6_end = addr_str.find("/", ipv6_start + 5)
-        if ipv6_end != -1:
-            return addr_str[ipv6_start + 5 : ipv6_end]
+    # Try IPv6
+    try:
+        return addr.value_for_protocol("ip6")
+    except ProtocolLookupError:
+        pass
 
     return None
 
