@@ -7,11 +7,12 @@ multiaddrs, matching JavaScript libp2p behavior.
 Reference: https://github.com/libp2p/js-libp2p/blob/main/packages/libp2p/src/connection-manager/resolvers/index.ts
 """
 
-import asyncio
 import logging
-from typing import TYPE_CHECKING
+import socket
+from typing import TYPE_CHECKING, Any
 
 from multiaddr import Multiaddr
+import trio
 
 if TYPE_CHECKING:
     pass
@@ -118,9 +119,13 @@ class DNSResolver:
 
             # Resolve DNS name to IP addresses
             try:
-                # Use asyncio.get_event_loop().getaddrinfo for DNS resolution
-                loop = asyncio.get_event_loop()
-                addr_info = await loop.getaddrinfo(dns_name, None, type=0, proto=0)
+                # Use trio's to_thread.run_sync to execute getaddrinfo in a thread
+                # (getaddrinfo is blocking)
+                # family=0 (unspecified), type=0 (any), proto=0 (any)
+                def getaddrinfo_sync_wrap() -> list[tuple[Any, ...]]:
+                    return socket.getaddrinfo(dns_name, None, 0, 0, 0)
+
+                addr_info = await trio.to_thread.run_sync(getaddrinfo_sync_wrap)
 
                 # Replace DNS component with IP addresses
                 for family, _, _, _, sockaddr in addr_info:
