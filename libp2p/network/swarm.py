@@ -1145,7 +1145,7 @@ class Swarm(Service, INetworkService):
         # The actual enforcement happens at the listener level
 
         # Extract IP address for rate limiting and connection gating
-        from libp2p.network.connection_gate import extract_ip_from_multiaddr
+        from libp2p.network.address_manager import extract_ip_from_multiaddr
 
         remote_ip: str | None = None
         if hasattr(raw_conn, "get_remote_address"):
