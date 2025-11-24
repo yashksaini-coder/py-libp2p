@@ -68,23 +68,17 @@ class ConnectionMetrics:
         self.inbound_pending = inbound_pending
         self.outbound_pending = outbound_pending
 
-        total_connections = 0
         for conn_list in connections.values():
             for conn in conn_list:
-                total_connections += 1
-                # Determine direction - connections may track direction in future
-                # For now, we can't distinguish, so we'll track total only
-                # TODO: Add direction tracking to connections when implementing
-                # connection state management
-                if hasattr(conn, "direction"):
-                    direction = getattr(conn, "direction")
-                    if direction == "inbound":  # type: ignore
-                        self.inbound_connections += 1
-                    elif direction == "outbound":  # type: ignore
-                        self.outbound_connections += 1
-
-        # If direction is not tracked, we can't distinguish inbound/outbound
-        # This will be addressed in Phase 6 when we add connection state tracking
+                # Get direction from connection (SwarmConn tracks this)
+                direction = getattr(conn, "direction", "unknown")
+                if direction == "inbound":
+                    self.inbound_connections += 1
+                elif direction == "outbound":
+                    self.outbound_connections += 1
+                # If direction is "unknown", don't count it in either category
+                # This can happen for legacy connections or connections created
+                # before direction tracking was added
 
     def update_stream_metrics(self, connections: dict[ID, list[INetConn]]) -> None:
         """
@@ -121,16 +115,11 @@ class ConnectionMetrics:
                         # Convert TProtocol to string if needed
                         protocol = str(protocol)
 
-                    # Direction tracking: Currently not available in Python libp2p
-                    # We'll track as "unknown" for now
-                    direction = "unknown"
-                    # TODO: Add direction tracking when connection state
-                    # management is implemented
-                    # Note: JS libp2p uses "{direction} {protocol}" format
-                    # We'll use "{protocol}" until direction tracking is added
+                    # Get direction from connection (SwarmConn tracks this)
+                    # Stream direction matches the connection direction
+                    direction = getattr(conn, "direction", "unknown")
 
-                    # Create key: "{direction} {protocol}" (matching JS format)
-                    # For now: "{protocol}" until direction is available
+                    # Create key: "{direction} {protocol}" (matching JS libp2p format)
                     key = f"{direction} {protocol}"
                     protocol_counts[key] += 1
                     self.protocol_streams[key] += 1
