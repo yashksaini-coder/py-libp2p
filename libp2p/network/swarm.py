@@ -36,7 +36,7 @@ from libp2p.network.config import ConnectionConfig, RetryConfig
 from libp2p.network.connection_gate import ConnectionGate
 from libp2p.network.connection_pruner import ConnectionPruner
 from libp2p.network.dial_queue import DialQueue
-from libp2p.network.dns_resolver import DNSResolver
+from multiaddr.resolvers import DNSResolver
 from libp2p.network.metrics import (
     ConnectionMetrics,
     calculate_connection_metrics,
