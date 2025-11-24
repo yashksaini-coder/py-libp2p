@@ -3,26 +3,53 @@
 Example demonstrating connection limits and pruning.
 
 This example shows how to:
-1. Configure connection limits
-2. Observe automatic connection pruning
-3. Monitor connection counts
-4. Handle connection limit exceeded scenarios
+1. Configure connection limits on a host
+2. Create multiple peer hosts
+3. Observe connection limit behavior
+4. Monitor connection counts and pruning
+5. Handle connection limit exceeded scenarios
+
+Note: This example uses multiple hosts on different ports to demonstrate inbound connection limits.
 """
 
+import asyncio
+import contextlib
 import logging
-from typing import TYPE_CHECKING
+import secrets
 
 import trio
 
-from libp2p import new_swarm
+from libp2p import new_host, new_swarm
+from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.network.config import ConnectionConfig
-
-if TYPE_CHECKING:
-    pass
+from libp2p.peer.peerinfo import PeerInfo
+# Note: We use default security (Noise) by not specifying sec_opt
+# This ensures proper peer ID verification and handshake
+from libp2p.utils.address_validation import get_available_interfaces
+from libp2p.host.basic_host import BasicHost
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+async def create_peer_host(port: int, name: str) -> tuple[BasicHost, int]:
+    """Create a peer host listening on the given port."""
+    # Create key pair
+    key_pair = create_new_key_pair(secrets.token_bytes(32))
+    
+    # Get available interfaces for this port
+    listen_addrs = get_available_interfaces(port)
+    
+    # Create host with default security (Noise) - no explicit sec_opt needed
+    # This ensures proper peer ID verification and handshake
+    host = new_host(
+        key_pair=key_pair,
+        listen_addrs=listen_addrs
+    )
+    
+    logger.info(f"Created peer {name} on port {port}")
+    return host, port
 
 
 async def example_basic_connection_limits() -> None:
@@ -30,26 +57,104 @@ async def example_basic_connection_limits() -> None:
     logger.info("=" * 60)
     logger.info("Example: Basic Connection Limits")
     logger.info("=" * 60)
-
-    # Create swarm with low connection limit for demonstration
+    
+    # Create main host with low connection limit for demonstration
     connection_config = ConnectionConfig(
-        max_connections=5,  # Very low limit for demo
-        max_connections_per_peer=2,
+        max_connections=3,  # Very low limit for demo
+        max_connections_per_peer=1,  # One connection per peer
     )
-
-    swarm = new_swarm(connection_config=connection_config)
-
-    logger.info(f"Swarm created with peer ID: {swarm.get_peer_id()}")
+    
+    # Create main host with default security (Noise)
+    main_key_pair = create_new_key_pair(secrets.token_bytes(32))
+    main_listen_addrs = get_available_interfaces(9000)
+    
+    # Create swarm with connection_config, then create BasicHost from it
+    # Using default security (Noise) by not specifying sec_opt
+    swarm = new_swarm(
+        key_pair=main_key_pair,
+        listen_addrs=main_listen_addrs,
+        connection_config=connection_config
+    )
+    main_host = BasicHost(network=swarm)
+    
+    logger.info(f"Main host created with peer ID: {main_host.get_id().pretty()}")
     logger.info(f"Max connections: {connection_config.max_connections}")
-    max_per_peer = connection_config.max_connections_per_peer
-    logger.info(f"Max connections per peer: {max_per_peer}")
-
-    # Get current connection count
-    connections = swarm.get_connections()
-    logger.info(f"Current connections: {len(connections)}")
-
-    await swarm.close()
-    logger.info("Basic connection limits example completed\n")
+    logger.info(f"Max connections per peer: {connection_config.max_connections_per_peer}")
+    
+    # Create peer hosts
+    NUM_PEERS = 10
+    peer_hosts = []
+    
+    # Create all peer hosts first
+    for i in range(NUM_PEERS):
+        port = 9001 + i  # Different ports for each peer
+        peer_host, actual_port = await create_peer_host(port, f"Peer-{i+1}")
+        peer_hosts.append((peer_host, actual_port))
+    
+    # Use AsyncExitStack to manage all hosts
+    async with contextlib.AsyncExitStack() as stack:
+        # Start main host
+        await stack.enter_async_context(main_host.run(listen_addrs=main_listen_addrs))
+        
+        # Start all peer hosts
+        for peer_host, (_, port) in zip([p[0] for p in peer_hosts], peer_hosts):
+            peer_listen_addrs = get_available_interfaces(port)
+            await stack.enter_async_context(peer_host.run(listen_addrs=peer_listen_addrs))
+        
+        async with trio.open_nursery() as nursery:
+            # Wait a bit for hosts to start
+            await trio.sleep(2)
+            
+            # Get main host address
+            main_addr = main_host.get_addrs()[0]
+            main_peer_id = main_host.get_id()
+            
+            logger.info(f"Main host listening on: {main_addr}")
+            
+            # Attempt connections from peers to main host
+            connected_count = 0
+            logger.info(f"\nAttempting connections from {NUM_PEERS} peers to main host...")
+            
+            for i, (peer_host, peer_port) in enumerate(peer_hosts):
+                try:
+                    # Create PeerInfo for main host
+                    peer_info = PeerInfo(
+                        main_peer_id,
+                        [main_addr]
+                    )
+                    
+                    # Connect peer to main host
+                    await peer_host.connect(peer_info)
+                    
+                    # Check if connection was successful
+                    if main_peer_id in peer_host.get_live_peers():
+                        connected_count += 1
+                        logger.info(f"✅ Peer-{i+1} connected successfully")
+                    else:
+                        logger.info(f"❌ Peer-{i+1} connection failed (likely due to limits)")
+                    
+                    # Small delay between connection attempts
+                    await trio.sleep(0.1)
+                    
+                except Exception as e:
+                    logger.info(f"❌ Peer-{i+1} connection failed: {e}")
+            
+            # Check final connection count on main host
+            live_peers = main_host.get_live_peers()
+            logger.info(f"\nFinal connection count: {len(live_peers)}")
+            logger.info(f"Expected max: {connection_config.max_connections}")
+            logger.info(f"Peers attempted to connect: {NUM_PEERS}")
+            logger.info(f"Peers successfully connected: {connected_count}")
+            
+            # Show which peers are connected
+            logger.info(f"Connected peers: {[p.pretty() for p in live_peers]}")
+            
+            # Clean shutdown
+            logger.info("\nShutting down...")
+            await trio.sleep(1)
+        
+        # Hosts are automatically closed by AsyncExitStack
+        logger.info("Basic connection limits example completed\n")
 
 
 async def example_connection_pruning() -> None:
@@ -57,116 +162,97 @@ async def example_connection_pruning() -> None:
     logger.info("=" * 60)
     logger.info("Example: Connection Pruning")
     logger.info("=" * 60)
-
-    # Create swarm with connection limits
+    
+    # Create main host with low connection limit
     connection_config = ConnectionConfig(
-        max_connections=3,  # Low limit to trigger pruning
+        max_connections=2,  # Low limit to trigger pruning
         max_connections_per_peer=1,
     )
-
-    swarm = new_swarm(connection_config=connection_config)
-
+    
+    # Create main host with default security (Noise)
+    main_key_pair = create_new_key_pair(secrets.token_bytes(32))
+    main_listen_addrs = get_available_interfaces(9010)
+    
+    # Create swarm with connection_config, then create BasicHost from it
+    # Using default security (Noise) by not specifying sec_opt
+    swarm = new_swarm(
+        key_pair=main_key_pair,
+        listen_addrs=main_listen_addrs,
+        connection_config=connection_config
+    )
+    main_host = BasicHost(network=swarm)
+    
     logger.info("Connection pruning behavior:")
-    logger.info("  - When max_connections is exceeded, connections are pruned")
+    logger.info("  - When max_connections exceeded, connections are pruned")
     logger.info("  - Pruning priority: peer tag value → stream count → direction → age")
-    logger.info("  - Connections in allow list are never pruned")
+    logger.info("  - Connections in allow list never pruned")
     logger.info(f"  - Current max_connections: {connection_config.max_connections}")
-
-    # Access connection pruner
-    if hasattr(swarm, "connection_pruner"):
-        logger.info("  - Connection pruner is active")
-
-    await swarm.close()
+    
+    # Create all peer hosts first
+    peer_hosts = []
+    for i in range(5):
+        port = 9011 + i
+        peer_host, _ = await create_peer_host(port, f"PrunePeer-{i+1}")
+        peer_hosts.append(peer_host)
+    
+    # Use AsyncExitStack to manage all hosts
+    async with contextlib.AsyncExitStack() as stack:
+        # Start main host
+        await stack.enter_async_context(main_host.run(listen_addrs=main_listen_addrs))
+        
+        # Start all peer hosts
+        for i, peer_host in enumerate(peer_hosts):
+            port = 9011 + i
+            peer_listen_addrs = get_available_interfaces(port)
+            await stack.enter_async_context(peer_host.run(listen_addrs=peer_listen_addrs))
+        
+        await trio.sleep(2)
+        
+        async with trio.open_nursery() as nursery:
+            # Connect first 2 peers (should succeed, max_connections=2)
+            main_addr = main_host.get_addrs()[0]
+            main_peer_id = main_host.get_id()
+            
+            logger.info("Connecting first 2 peers (should succeed, max_connections=2)...")
+            for i in range(2):
+                try:
+                    peer_info = PeerInfo(main_peer_id, [main_addr])
+                    await peer_hosts[i].connect(peer_info)
+                    logger.info(f"✅ PrunePeer-{i+1} connected")
+                    await trio.sleep(0.5)
+                except Exception as e:
+                    logger.info(f"❌ PrunePeer-{i+1} connection failed: {e}")
+            
+            # Check current connections
+            current_count = len(main_host.get_live_peers())
+            logger.info(f"Current connections: {current_count} (max: 2)")
+            
+            # Connect 3rd peer (should trigger pruning or rejection)
+            logger.info("\nConnecting 3rd peer (should trigger pruning or rejection)...")
+            try:
+                peer_info = PeerInfo(main_peer_id, [main_addr])
+                await peer_hosts[2].connect(peer_info)
+                logger.info("✅ PrunePeer-3 connected (pruning may have occurred)")
+            except Exception as e:
+                logger.info(f"❌ PrunePeer-3 connection failed (expected if limit enforced): {e}")
+            
+            # Check final connections
+            final_count = len(main_host.get_live_peers())
+            logger.info(f"Final connections after pruning attempt: {final_count} (max: 2)")
+            
+            await trio.sleep(1)
+        
+        # Hosts are automatically closed by AsyncExitStack
+    
     logger.info("Connection pruning example completed\n")
 
 
-async def example_dynamic_limit_adjustment() -> None:
-    """Example of dynamically adjusting connection limits."""
-    logger.info("=" * 60)
-    logger.info("Example: Dynamic Limit Adjustment")
-    logger.info("=" * 60)
-
-    connection_config = ConnectionConfig(max_connections=10)
-    swarm = new_swarm(connection_config=connection_config)
-
-    logger.info(f"Initial max_connections: {connection_config.max_connections}")
-
-    # Simulate dynamic adjustment
-    connection_config.max_connections = 5
-    logger.info(f"Adjusted max_connections: {connection_config.max_connections}")
-    logger.info("  - Reducing max_connections will trigger pruning if needed")
-
-    # Increase limit
-    connection_config.max_connections = 20
-    logger.info(f"Increased max_connections: {connection_config.max_connections}")
-    logger.info("  - Increasing max_connections allows more connections")
-
-    await swarm.close()
-    logger.info("Dynamic limit adjustment example completed\n")
-
-
-async def example_per_peer_limits() -> None:
-    """Example of per-peer connection limits."""
-    logger.info("=" * 60)
-    logger.info("Example: Per-Peer Connection Limits")
-    logger.info("=" * 60)
-
-    connection_config = ConnectionConfig(
-        max_connections=100,  # Total connections
-        max_connections_per_peer=3,  # Per-peer limit
-    )
-
-    swarm = new_swarm(connection_config=connection_config)
-
-    logger.info("Per-peer connection limits:")
-    logger.info(f"  - Max total connections: {connection_config.max_connections}")
-    logger.info(f"  - Max per peer: {connection_config.max_connections_per_peer}")
-    logger.info("  - This prevents a single peer from consuming all connections")
-
-    await swarm.close()
-    logger.info("Per-peer limits example completed\n")
-
-
-async def example_connection_limit_exceeded() -> None:
-    """Example of handling connection limit exceeded scenarios."""
-    logger.info("=" * 60)
-    logger.info("Example: Connection Limit Exceeded Handling")
-    logger.info("=" * 60)
-
-    connection_config = ConnectionConfig(
-        max_connections=2,  # Very low limit
-        max_incoming_pending_connections=1,
-    )
-
-    swarm = new_swarm(connection_config=connection_config)
-
-    logger.info("When connection limits are exceeded:")
-    logger.info("  - New incoming connections are rejected")
-    logger.info("  - Dial attempts may be queued or rejected")
-    logger.info("  - Existing connections may be pruned to make room")
-    logger.info(f"  - Current limit: {connection_config.max_connections}")
-
-    await swarm.close()
-    logger.info("Connection limit exceeded example completed\n")
-
-
 async def main() -> None:
-    """Run all connection limits examples."""
-    logger.info("\n" + "=" * 60)
-    logger.info("Connection Limits Examples")
-    logger.info("=" * 60 + "\n")
-
+    """Run the connection limits examples."""
     try:
         await example_basic_connection_limits()
         await example_connection_pruning()
-        await example_dynamic_limit_adjustment()
-        await example_per_peer_limits()
-        await example_connection_limit_exceeded()
-
-        logger.info("=" * 60)
-        logger.info("All connection limits examples completed successfully!")
-        logger.info("=" * 60)
-
+        logger.info("All connection management examples completed successfully!")
     except Exception as e:
         logger.error(f"Example failed: {e}", exc_info=True)
         raise
