@@ -11,11 +11,14 @@ This example shows how to:
 
 import logging
 import secrets
+from typing import cast
 
 import trio
 
 from libp2p import new_host
 from libp2p.crypto.secp256k1 import create_new_key_pair
+from libp2p.network.swarm import Swarm
+from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 from libp2p.utils.address_validation import get_available_interfaces
 
@@ -75,12 +78,14 @@ async def example_connection_states() -> None:
         # Show connections from host_1's perspective (inbound)
         for conn in connections_1:
             direction = getattr(conn, "direction", "unknown")
-            peer_id = (
+            peer_id: ID | str = (
                 conn.muxed_conn.peer_id if hasattr(conn, "muxed_conn") else "unknown"
             )
+            peer_id_str = (
+                peer_id.pretty()[:20] if isinstance(peer_id, ID) else str(peer_id)
+            )
             logger.info(
-                f"  Host_1 → Connection from {peer_id.pretty()[:20]}... "
-                f"- Direction: {direction}"
+                f"  Host_1 → Connection from {peer_id_str}... - Direction: {direction}"
             )
             logger.info(f"    Is closed: {conn.is_closed}")
             logger.info(f"    Active streams: {len(conn.get_streams())}")
@@ -88,12 +93,14 @@ async def example_connection_states() -> None:
         # Show connections from host_2's perspective (outbound)
         for conn in connections_2:
             direction = getattr(conn, "direction", "unknown")
-            peer_id = (
+            peer_id: ID | str = (
                 conn.muxed_conn.peer_id if hasattr(conn, "muxed_conn") else "unknown"
             )
+            peer_id_str = (
+                peer_id.pretty()[:20] if isinstance(peer_id, ID) else str(peer_id)
+            )
             logger.info(
-                f"  Host_2 → Connection to {peer_id.pretty()[:20]}... "
-                f"- Direction: {direction}"
+                f"  Host_2 → Connection to {peer_id_str}... - Direction: {direction}"
             )
             logger.info(f"    Is closed: {conn.is_closed}")
             logger.info(f"    Active streams: {len(conn.get_streams())}")
@@ -145,7 +152,7 @@ async def example_connection_timeline() -> None:
         logger.info(f"\nTracking timeline for {len(connections)} connections")
 
         for conn in connections:
-            peer_id = (
+            peer_id: ID | str = (
                 conn.muxed_conn.peer_id if hasattr(conn, "muxed_conn") else "unknown"
             )
             created_at = getattr(conn, "_created_at", None)
@@ -153,7 +160,10 @@ async def example_connection_timeline() -> None:
                 import time
 
                 age = time.time() - created_at
-                logger.info(f"  Connection to {peer_id.pretty()[:20]}...:")
+                peer_id_str = (
+                    peer_id.pretty()[:20] if isinstance(peer_id, ID) else str(peer_id)
+                )
+                logger.info(f"  Connection to {peer_id_str}...:")
                 logger.info(f"    - Created at: {created_at:.2f}")
                 logger.info(f"    - Age: {age:.2f} seconds")
                 logger.info(f"    - Is closed: {conn.is_closed}")
@@ -209,7 +219,7 @@ async def example_connection_queries() -> None:
         logger.info("\n✅ Connected host_2 and host_3 to host_1")
 
         # Get connections from host_1's network (inbound connections)
-        swarm_1 = host_1.get_network()
+        swarm_1 = cast(Swarm, host_1.get_network())
 
         # Get all connections
         all_connections = swarm_1.get_connections()

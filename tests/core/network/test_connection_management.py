@@ -7,12 +7,12 @@ address manager, and DNS resolver.
 
 import pytest
 from multiaddr import Multiaddr
+from multiaddr.resolvers import DNSResolver
 
 from libp2p.network.address_manager import AddressManager, default_address_sorter
 from libp2p.network.config import ConnectionConfig
 from libp2p.network.connection_gate import ConnectionGate
 from libp2p.network.connection_state import ConnectionState, ConnectionStatus
-from libp2p.network.dns_resolver import DNSResolver
 from libp2p.network.rate_limiter import ConnectionRateLimiter
 
 
@@ -218,13 +218,14 @@ class TestAddressManager:
 
 
 class TestDNSResolver:
-    """Test DNS resolver functionality."""
+    """Test DNS resolver functionality using py-multiaddr's DNSResolver."""
 
     @pytest.mark.trio
     async def test_dns_resolver_initialization(self):
         """Test DNS resolver initialization."""
-        resolver = DNSResolver(max_recursion_depth=32)
-        assert resolver.max_recursion_depth == 32
+        # py-multiaddr DNSResolver has MAX_RECURSIVE_DEPTH as a class attribute
+        assert DNSResolver.MAX_RECURSIVE_DEPTH > 0
+        assert DNSResolver.DEFAULT_TIMEOUT > 0
 
     @pytest.mark.trio
     async def test_dns_resolver_non_dns_address(self):
@@ -233,34 +234,35 @@ class TestDNSResolver:
         addr = Multiaddr("/ip4/192.168.1.1/tcp/1234")
         resolved = await resolver.resolve(addr)
 
-        # Non-DNS address should return as-is
+        # Non-DNS address should return as-is in a list
+        assert isinstance(resolved, list)
         assert len(resolved) == 1
         assert resolved[0] == addr
 
     @pytest.mark.trio
-    async def test_dns_resolver_cache(self):
-        """Test DNS resolver caching."""
+    async def test_dns_resolver_consistency(self):
+        """Test that resolver returns consistent results."""
         resolver = DNSResolver()
         addr = Multiaddr("/ip4/192.168.1.1/tcp/1234")
 
-        # First resolution
+        # Multiple resolutions should return same result
         resolved1 = await resolver.resolve(addr)
-        # Second resolution should use cache
         resolved2 = await resolver.resolve(addr)
 
         assert resolved1 == resolved2
+        assert len(resolved1) == 1
+        assert resolved1[0] == addr
 
     @pytest.mark.trio
-    async def test_dns_resolver_clear_cache(self):
-        """Test clearing DNS cache."""
+    async def test_dns_resolver_returns_list(self):
+        """Test that resolver always returns a list."""
         resolver = DNSResolver()
-        addr = Multiaddr("/ip4/192.168.1.1/tcp/1234")
+        addr = Multiaddr("/ip4/127.0.0.1/tcp/1234")
+        resolved = await resolver.resolve(addr)
 
-        await resolver.resolve(addr)
-        assert len(resolver._cache) > 0
-
-        resolver.clear_cache()
-        assert len(resolver._cache) == 0
+        assert isinstance(resolved, list)
+        assert len(resolved) > 0
+        assert all(isinstance(addr, Multiaddr) for addr in resolved)
 
 
 class TestConnectionConfig:

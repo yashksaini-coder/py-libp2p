@@ -46,6 +46,10 @@ async def create_peer_host(port: int, name: str) -> tuple[BasicHost, int]:
     # This ensures proper peer ID verification and handshake
     host = new_host(key_pair=key_pair, listen_addrs=listen_addrs)
 
+    # Ensure the returned host is specifically a BasicHost
+    if not isinstance(host, BasicHost):
+        host = BasicHost(network=host.get_network())
+
     logger.info(f"Created peer {name} on port {port}")
     return host, port
 

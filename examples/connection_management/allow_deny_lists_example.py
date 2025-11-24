@@ -15,6 +15,7 @@ Note: Reduced logging to focus on actual feature demonstrations.
 import contextlib
 import logging
 import secrets
+from typing import cast
 
 import trio
 
@@ -23,6 +24,7 @@ from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.host.basic_host import BasicHost
 from libp2p.network.config import ConnectionConfig
 from libp2p.network.connection_gate import ConnectionGate
+from libp2p.network.swarm import Swarm
 from libp2p.peer.peerinfo import PeerInfo
 from libp2p.utils.address_validation import get_available_interfaces
 
@@ -339,10 +341,13 @@ async def example_production_configuration() -> None:
     main_key_pair = create_new_key_pair(secrets.token_bytes(32))
     main_listen_addrs = get_available_interfaces(7120)
 
-    swarm = new_swarm(
-        key_pair=main_key_pair,
-        listen_addrs=main_listen_addrs,
-        connection_config=connection_config,
+    swarm = cast(
+        Swarm,
+        new_swarm(
+            key_pair=main_key_pair,
+            listen_addrs=main_listen_addrs,
+            connection_config=connection_config,
+        ),
     )
     main_host = BasicHost(network=swarm)
 
