@@ -3,218 +3,419 @@
 Comprehensive example demonstrating all connection management features.
 
 This example shows a production-ready configuration combining:
-1. Connection limits
-2. Rate limiting
-3. Allow/deny lists
-4. Connection state monitoring
-5. Best practices
+1. Connection limits with real connections
+2. Connection metrics and monitoring
+3. Connection state tracking
+4. Multiple connections per peer
+5. Production best practices
+
+Note: Reduced logging to focus on actual feature demonstrations.
 """
 
+import contextlib
 import logging
+import secrets
 
 import trio
 
-from libp2p import new_swarm
+from libp2p import new_host, new_swarm
+from libp2p.crypto.secp256k1 import create_new_key_pair
+from libp2p.host.basic_host import BasicHost
 from libp2p.network.config import ConnectionConfig
+from libp2p.peer.peerinfo import PeerInfo
+from libp2p.utils.address_validation import get_available_interfaces
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
+# Set up logging - reduced verbosity to focus on demonstrations
+logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
+# Enable INFO for our example output
+logger.setLevel(logging.INFO)
 
 
 async def example_production_configuration() -> None:
-    """Example of production-ready connection management configuration."""
-    logger.info("=" * 60)
-    logger.info("Example: Production Configuration")
-    logger.info("=" * 60)
+    """Demonstrate production-ready configuration with real connections."""
+    print("\n" + "=" * 60)
+    print("Example 1: Production Configuration")
+    print("=" * 60)
 
     # Production-ready configuration
     connection_config = ConnectionConfig(
-        # Connection limits
+        max_connections=5,  # Low for demo
+        max_connections_per_peer=2,
+        max_parallel_dials=10,
+        inbound_connection_threshold=5,
+        allow_list=["192.168.0.0/16"],  # Local network
+    )
+
+    # Create main host with production config
+    main_key_pair = create_new_key_pair(secrets.token_bytes(32))
+    main_listen_addrs = get_available_interfaces(7000)
+    
+    swarm = new_swarm(
+        key_pair=main_key_pair,
+        listen_addrs=main_listen_addrs,
+        connection_config=connection_config
+    )
+    main_host = BasicHost(network=swarm)
+
+    print(f"\n📋 Configuration:")
+    print(f"   Max connections: {connection_config.max_connections}")
+    print(f"   Max per peer: {connection_config.max_connections_per_peer}")
+    print(f"   Rate limit: {connection_config.inbound_connection_threshold}/sec")
+    print(f"   Allow list: {len(connection_config.allow_list)} network(s)")
+
+    # Create peer hosts
+    peer_hosts = []
+    for i in range(3):
+        key_pair = create_new_key_pair(secrets.token_bytes(32))
+        listen_addrs = get_available_interfaces(7001 + i)
+        host = new_host(key_pair=key_pair, listen_addrs=listen_addrs)
+        peer_hosts.append(host)
+
+    async with contextlib.AsyncExitStack() as stack:
+        await stack.enter_async_context(main_host.run(listen_addrs=main_listen_addrs))
+        for i, peer_host in enumerate(peer_hosts):
+            listen_addrs = get_available_interfaces(7001 + i)
+            await stack.enter_async_context(peer_host.run(listen_addrs=listen_addrs))
+        
+        await trio.sleep(1)
+        
+        # Connect peers to main host
+        main_addr = main_host.get_addrs()[0]
+        main_peer_id = main_host.get_id()
+        
+        print(f"\n🔗 Connecting {len(peer_hosts)} peers to main host...")
+        connected = 0
+        for i, peer_host in enumerate(peer_hosts):
+            try:
+                peer_info = PeerInfo(main_peer_id, [main_addr])
+                await peer_host.connect(peer_info)
+                connected += 1
+                print(f"   ✅ Peer {i+1} connected")
+            except Exception as e:
+                print(f"   ❌ Peer {i+1} failed: {e}")
+        
+        await trio.sleep(0.5)
+        
+        # Show metrics
+        metrics = swarm.get_metrics()
+        print(f"\n📊 Metrics:")
+        print(f"   Inbound: {metrics.inbound_connections}")
+        print(f"   Outbound: {metrics.outbound_connections}")
+        print(f"   Total: {swarm.get_total_connections()}")
+        print(f"   Max allowed: {connection_config.max_connections}")
+        
+        await trio.sleep(0.5)
+    
+    print("✅ Production configuration demo completed\n")
+
+
+async def example_connection_metrics() -> None:
+    """Demonstrate connection metrics and monitoring."""
+    print("\n" + "=" * 60)
+    print("Example 2: Connection Metrics & Monitoring")
+    print("=" * 60)
+
+    connection_config = ConnectionConfig(max_connections=10)
+    
+    main_key_pair = create_new_key_pair(secrets.token_bytes(32))
+    main_listen_addrs = get_available_interfaces(7010)
+    
+    swarm = new_swarm(
+        key_pair=main_key_pair,
+        listen_addrs=main_listen_addrs,
+        connection_config=connection_config
+    )
+    main_host = BasicHost(network=swarm)
+
+    # Create multiple peers
+    peer_hosts = []
+    for i in range(5):
+        key_pair = create_new_key_pair(secrets.token_bytes(32))
+        listen_addrs = get_available_interfaces(7011 + i)
+        host = new_host(key_pair=key_pair, listen_addrs=listen_addrs)
+        peer_hosts.append(host)
+
+    async with contextlib.AsyncExitStack() as stack:
+        await stack.enter_async_context(main_host.run(listen_addrs=main_listen_addrs))
+        for i, peer_host in enumerate(peer_hosts):
+            listen_addrs = get_available_interfaces(7011 + i)
+            await stack.enter_async_context(peer_host.run(listen_addrs=listen_addrs))
+        
+        await trio.sleep(1)
+        
+        # Connect all peers
+        main_addr = main_host.get_addrs()[0]
+        main_peer_id = main_host.get_id()
+        
+        print(f"\n🔗 Establishing connections...")
+        for i, peer_host in enumerate(peer_hosts):
+            try:
+                peer_info = PeerInfo(main_peer_id, [main_addr])
+                await peer_host.connect(peer_info)
+            except Exception:
+                pass
+        
+        await trio.sleep(0.5)
+        
+        # Get comprehensive metrics
+        metrics = swarm.get_metrics()
+        metrics_dict = metrics.to_dict()
+        
+        print(f"\n📊 Connection Metrics:")
+        print(f"   Inbound: {metrics.inbound_connections}")
+        print(f"   Outbound: {metrics.outbound_connections}")
+        print(f"   Total: {swarm.get_total_connections()}")
+        
+        # Connection map
+        conn_map = swarm.get_connections_map()
+        print(f"\n📋 Connection Map:")
+        print(f"   Unique peers: {len(conn_map)}")
+        for peer_id, conns in conn_map.items():
+            directions = [getattr(c, "direction", "unknown") for c in conns]
+            inbound_count = directions.count("inbound")
+            outbound_count = directions.count("outbound")
+            print(f"   Peer {peer_id.pretty()[:20]}...: {len(conns)} conn(s) "
+                  f"(inbound: {inbound_count}, outbound: {outbound_count})")
+        
+        # 90th percentile metrics
+        percentile = metrics.get_protocol_streams_per_connection_90th_percentile()
+        if percentile:
+            print(f"\n📈 90th Percentile Stream Metrics:")
+            for protocol, value in percentile.items():
+                print(f"   {protocol}: {value:.2f}")
+        
+        await trio.sleep(0.5)
+    
+    print("✅ Metrics demo completed\n")
+
+
+async def example_connection_limits_demo() -> None:
+    """Demonstrate connection limits in action."""
+    print("\n" + "=" * 60)
+    print("Example 3: Connection Limits Demonstration")
+    print("=" * 60)
+
+    # Low limits for demonstration
+    connection_config = ConnectionConfig(
+        max_connections=3,
+        max_connections_per_peer=1,
+    )
+    
+    main_key_pair = create_new_key_pair(secrets.token_bytes(32))
+    main_listen_addrs = get_available_interfaces(7020)
+    
+    swarm = new_swarm(
+        key_pair=main_key_pair,
+        listen_addrs=main_listen_addrs,
+        connection_config=connection_config
+    )
+    main_host = BasicHost(network=swarm)
+
+    # Create more peers than the limit
+    NUM_PEERS = 6
+    peer_hosts = []
+    for i in range(NUM_PEERS):
+        key_pair = create_new_key_pair(secrets.token_bytes(32))
+        listen_addrs = get_available_interfaces(7021 + i)
+        host = new_host(key_pair=key_pair, listen_addrs=listen_addrs)
+        peer_hosts.append(host)
+
+    async with contextlib.AsyncExitStack() as stack:
+        await stack.enter_async_context(main_host.run(listen_addrs=main_listen_addrs))
+        for i, peer_host in enumerate(peer_hosts):
+            listen_addrs = get_available_interfaces(7021 + i)
+            await stack.enter_async_context(peer_host.run(listen_addrs=listen_addrs))
+        
+        await trio.sleep(1)
+        
+        main_addr = main_host.get_addrs()[0]
+        main_peer_id = main_host.get_id()
+        
+        print(f"\n🔗 Attempting {NUM_PEERS} connections (limit: {connection_config.max_connections})...")
+        successful = 0
+        failed = 0
+        
+        for i, peer_host in enumerate(peer_hosts):
+            try:
+                peer_info = PeerInfo(main_peer_id, [main_addr])
+                await peer_host.connect(peer_info)
+                successful += 1
+                print(f"   ✅ Peer {i+1}: Connected")
+            except Exception:
+                failed += 1
+                print(f"   ❌ Peer {i+1}: Rejected (limit reached)")
+            await trio.sleep(0.1)
+        
+        await trio.sleep(0.5)
+        
+        # Show final state
+        final_count = swarm.get_total_connections()
+        print(f"\n📊 Results:")
+        print(f"   Successful: {successful}")
+        print(f"   Failed: {failed}")
+        print(f"   Final connections: {final_count}")
+        print(f"   Max allowed: {connection_config.max_connections}")
+        print(f"   ✅ Limit enforcement: {'Working' if final_count <= connection_config.max_connections else 'Failed'}")
+        
+        await trio.sleep(0.5)
+    
+    print("✅ Connection limits demo completed\n")
+
+
+async def example_connection_state_tracking() -> None:
+    """Demonstrate connection state tracking and lifecycle."""
+    print("\n" + "=" * 60)
+    print("Example 4: Connection State Tracking")
+    print("=" * 60)
+
+    connection_config = ConnectionConfig(max_connections=5)
+    
+    main_key_pair = create_new_key_pair(secrets.token_bytes(32))
+    main_listen_addrs = get_available_interfaces(7030)
+    
+    swarm = new_swarm(
+        key_pair=main_key_pair,
+        listen_addrs=main_listen_addrs,
+        connection_config=connection_config
+    )
+    main_host = BasicHost(network=swarm)
+
+    # Create peer hosts
+    peer_hosts = []
+    for i in range(3):
+        key_pair = create_new_key_pair(secrets.token_bytes(32))
+        listen_addrs = get_available_interfaces(7031 + i)
+        host = new_host(key_pair=key_pair, listen_addrs=listen_addrs)
+        peer_hosts.append(host)
+
+    async with contextlib.AsyncExitStack() as stack:
+        await stack.enter_async_context(main_host.run(listen_addrs=main_listen_addrs))
+        for i, peer_host in enumerate(peer_hosts):
+            listen_addrs = get_available_interfaces(7031 + i)
+            await stack.enter_async_context(peer_host.run(listen_addrs=listen_addrs))
+        
+        await trio.sleep(1)
+        
+        main_addr = main_host.get_addrs()[0]
+        main_peer_id = main_host.get_id()
+        
+        print(f"\n🔗 Establishing connections...")
+        connections_established = []
+        
+        for i, peer_host in enumerate(peer_hosts):
+            try:
+                peer_info = PeerInfo(main_peer_id, [main_addr])
+                await peer_host.connect(peer_info)
+                await trio.sleep(0.2)
+                
+                # Get connection from peer's perspective
+                peer_swarm = peer_host.get_network()
+                conns = peer_swarm.get_connections(main_peer_id)
+                if conns:
+                    connections_established.append((i, conns[0]))
+                    print(f"   ✅ Peer {i+1}: Connected")
+            except Exception as e:
+                print(f"   ❌ Peer {i+1}: Failed")
+        
+        await trio.sleep(0.5)
+        
+        # Show connection state information
+        print(f"\n📊 Connection State Information:")
+        for i, conn in connections_established:
+            direction = getattr(conn, "direction", "unknown")
+            is_closed = conn.is_closed
+            streams = len(conn.get_streams())
+            created_at = getattr(conn, "_created_at", None)
+            
+            print(f"   Peer {i+1}:")
+            print(f"      Direction: {direction}")
+            print(f"      Status: {'CLOSED' if is_closed else 'OPEN'}")
+            print(f"      Streams: {streams}")
+            if created_at:
+                import time
+                age = time.time() - created_at
+                print(f"      Age: {age:.2f}s")
+        
+        # Demonstrate connection closure
+        if connections_established:
+            print(f"\n🔌 Closing connection from Peer 1...")
+            _, conn_to_close = connections_established[0]
+            await conn_to_close.close()
+            await trio.sleep(0.2)
+            print(f"   Status after close: {'CLOSED' if conn_to_close.is_closed else 'OPEN'}")
+        
+        await trio.sleep(0.5)
+    
+    print("✅ State tracking demo completed\n")
+
+
+async def example_best_practices_summary() -> None:
+    """Summary of best practices with working example."""
+    print("\n" + "=" * 60)
+    print("Example 5: Best Practices Summary")
+    print("=" * 60)
+
+    print("\n📋 Best Practices Demonstrated:")
+    print("\n1. ✅ Connection Limits:")
+    print("   - Set max_connections based on system resources")
+    print("   - Use max_connections_per_peer to prevent abuse")
+    print("   - Monitor connection counts regularly")
+    
+    print("\n2. ✅ Metrics & Monitoring:")
+    print("   - Use get_metrics() for connection statistics")
+    print("   - Track 90th percentile stream metrics")
+    print("   - Monitor connection state transitions")
+    
+    print("\n3. ✅ Configuration:")
+    print("   - Start with defaults (max_connections=300)")
+    print("   - Tune based on actual usage patterns")
+    print("   - Use ConnectionConfig for all settings")
+    
+    print("\n4. ✅ Production Setup:")
+    print("   - Use new_swarm() with connection_config")
+    print("   - Create BasicHost from configured swarm")
+    print("   - Monitor metrics regularly")
+    
+    # Quick demo of proper setup
+    print("\n💡 Example Production Setup:")
+    config = ConnectionConfig(
         max_connections=300,
         max_connections_per_peer=3,
-        max_parallel_dials=100,
-        max_dial_queue_length=500,
-        max_incoming_pending_connections=10,
-        # Rate limiting
-        inbound_connection_threshold=5,  # 5 connections/sec per host
-        # Security - allow/deny lists
-        allow_list=[
-            "10.0.0.0/8",  # Internal network
-            "192.168.0.0/16",  # Local network
-        ],
-        deny_list=[
-            # Add known malicious IPs here
-        ],
-        # Timeouts
-        dial_timeout=10.0,
-        connection_close_timeout=1.0,
-        inbound_upgrade_timeout=10.0,
-        # Reconnection
-        reconnect_retries=5,
-        reconnect_retry_interval=1.0,
-        reconnect_backoff_factor=2.0,
-        max_parallel_reconnects=5,
+        inbound_connection_threshold=5,
     )
-
-    swarm = new_swarm(connection_config=connection_config)
-
-    logger.info("Production configuration applied:")
-    logger.info(f"  Max connections: {connection_config.max_connections}")
-    logger.info(f"  Max per peer: {connection_config.max_connections_per_peer}")
-    logger.info(f"  Rate limit: {connection_config.inbound_connection_threshold}/sec")
-    logger.info(f"  Allow list: {len(connection_config.allow_list)} entries")
-    logger.info(f"  Deny list: {len(connection_config.deny_list)} entries")
-
-    # Monitor connections
-    connections = swarm.get_connections()
-    logger.info(f"\nCurrent connections: {len(connections)}")
-
-    await swarm.close()
-    logger.info("Production configuration example completed\n")
-
-
-async def example_high_performance_config() -> None:
-    """Example of high-performance configuration."""
-    logger.info("=" * 60)
-    logger.info("Example: High-Performance Configuration")
-    logger.info("=" * 60)
-
-    # High-performance configuration
-    connection_config = ConnectionConfig(
-        max_connections=1000,
-        max_connections_per_peer=5,
-        max_parallel_dials=200,
-        max_dial_queue_length=1000,
-        inbound_connection_threshold=20,  # Higher threshold
-        max_incoming_pending_connections=50,
-        dial_timeout=5.0,  # Faster timeout
-    )
-
-    swarm = new_swarm(connection_config=connection_config)
-
-    logger.info("High-performance configuration:")
-    logger.info(f"  Max connections: {connection_config.max_connections}")
-    logger.info(f"  Max parallel dials: {connection_config.max_parallel_dials}")
-    logger.info(f"  Rate limit: {connection_config.inbound_connection_threshold}/sec")
-    logger.info("  Optimized for high throughput")
-
-    await swarm.close()
-    logger.info("High-performance configuration example completed\n")
-
-
-async def example_restrictive_config() -> None:
-    """Example of restrictive/secure configuration."""
-    logger.info("=" * 60)
-    logger.info("Example: Restrictive Configuration")
-    logger.info("=" * 60)
-
-    # Restrictive configuration
-    connection_config = ConnectionConfig(
-        max_connections=50,
-        max_connections_per_peer=1,
-        max_parallel_dials=10,
-        inbound_connection_threshold=2,  # Lower threshold
-        allow_list=["10.0.0.0/8"],  # Only allow internal network
-        deny_list=[],  # Add known bad IPs
-    )
-
-    swarm = new_swarm(connection_config=connection_config)
-
-    logger.info("Restrictive configuration:")
-    logger.info(f"  Max connections: {connection_config.max_connections}")
-    logger.info(f"  Rate limit: {connection_config.inbound_connection_threshold}/sec")
-    logger.info("  Only allows connections from allow list")
-    logger.info("  Suitable for secure/private networks")
-
-    await swarm.close()
-    logger.info("Restrictive configuration example completed\n")
-
-
-async def example_monitoring_setup() -> None:
-    """Example of setting up connection monitoring."""
-    logger.info("=" * 60)
-    logger.info("Example: Connection Monitoring")
-    logger.info("=" * 60)
-
-    connection_config = ConnectionConfig(max_connections=100)
-    swarm = new_swarm(connection_config=connection_config)
-
-    logger.info("Connection monitoring setup:")
-    logger.info("  1. Track connection counts")
-    logger.info("  2. Monitor rate limit violations")
-    logger.info("  3. Log connection state changes")
-    logger.info("  4. Alert on unusual patterns")
-
-    # Get connection statistics
-    connections = swarm.get_connections()
-    logger.info("\nCurrent statistics:")
-    logger.info(f"  Total connections: {len(connections)}")
-    logger.info(f"  Max allowed: {connection_config.max_connections}")
-    utilization = len(connections) / connection_config.max_connections * 100
-    logger.info(f"  Utilization: {utilization:.1f}%")
-
-    # Connection map
-    if hasattr(swarm, "get_connections_map"):
-        connections_map = swarm.get_connections_map()
-        logger.info(f"  Unique peers: {len(connections_map)}")
-
-    await swarm.close()
-    logger.info("Connection monitoring example completed\n")
-
-
-async def example_best_practices() -> None:
-    """Example demonstrating best practices."""
-    logger.info("=" * 60)
-    logger.info("Example: Best Practices")
-    logger.info("=" * 60)
-
-    logger.info("Connection management best practices:")
-    logger.info("\n1. Connection Limits:")
-    logger.info("   - Set max_connections based on system resources")
-    logger.info("   - Use max_connections_per_peer to prevent abuse")
-    logger.info("   - Monitor connection counts regularly")
-
-    logger.info("\n2. Rate Limiting:")
-    logger.info("   - Configure based on expected traffic")
-    logger.info("   - Balance between security and usability")
-    logger.info("   - Monitor rate limit violations")
-
-    logger.info("\n3. Allow/Deny Lists:")
-    logger.info("   - Keep allow lists small and specific")
-    logger.info("   - Regularly update deny lists")
-    logger.info("   - Use CIDR blocks for network ranges")
-
-    logger.info("\n4. Monitoring:")
-    logger.info("   - Track connection state transitions")
-    logger.info("   - Monitor connection lifecycle")
-    logger.info("   - Alert on anomalies")
-
-    logger.info("\n5. Configuration:")
-    logger.info("   - Start with defaults and tune based on needs")
-    logger.info("   - Test configurations in staging")
-    logger.info("   - Document configuration decisions")
+    print(f"   config = ConnectionConfig(")
+    print(f"       max_connections={config.max_connections},")
+    print(f"       max_connections_per_peer={config.max_connections_per_peer},")
+    print(f"       inbound_connection_threshold={config.inbound_connection_threshold},")
+    print(f"   )")
+    print(f"   swarm = new_swarm(connection_config=config)")
+    print(f"   host = BasicHost(network=swarm)")
+    
+    print("\n✅ Best practices summary completed\n")
 
 
 async def main() -> None:
     """Run comprehensive connection management examples."""
-    logger.info("\n" + "=" * 60)
-    logger.info("Comprehensive Connection Management Examples")
-    logger.info("=" * 60 + "\n")
+    print("\n" + "=" * 60)
+    print("Comprehensive Connection Management Demo")
+    print("=" * 60)
 
     try:
         await example_production_configuration()
-        await example_high_performance_config()
-        await example_restrictive_config()
-        await example_monitoring_setup()
-        await example_best_practices()
+        await example_connection_metrics()
+        await example_connection_limits_demo()
+        await example_connection_state_tracking()
+        await example_best_practices_summary()
 
-        logger.info("=" * 60)
-        logger.info("All comprehensive examples completed successfully!")
-        logger.info("=" * 60)
+        print("=" * 60)
+        print("✅ All comprehensive examples completed successfully!")
+        print("=" * 60 + "\n")
 
     except Exception as e:
-        logger.error(f"Example failed: {e}", exc_info=True)
+        print(f"\n❌ Example failed: {e}")
+        import traceback
+        traceback.print_exc()
         raise
 
 
