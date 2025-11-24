@@ -14,6 +14,7 @@ import time
 from typing import TYPE_CHECKING
 
 from multiaddr import Multiaddr
+from multiaddr.resolvers import DNSResolver
 import trio
 
 from libp2p.abc import INetConn
@@ -23,7 +24,6 @@ from libp2p.network.config import (
     MAX_DIAL_QUEUE_LENGTH,
     MAX_PARALLEL_DIALS,
 )
-from multiaddr.resolvers import DNSResolver
 from libp2p.peer.id import ID
 
 if TYPE_CHECKING:

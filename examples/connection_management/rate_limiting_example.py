@@ -42,19 +42,20 @@ async def example_basic_rate_limiting() -> None:
         max_connections=10,  # High enough to not be the limiting factor
     )
 
-    print(f"\n📋 Configuration:")
-    print(f"   Rate limit: {connection_config.inbound_connection_threshold} connections/sec per IP")
+    print("\n📋 Configuration:")
+    threshold = connection_config.inbound_connection_threshold
+    print(f"   Rate limit: {threshold} connections/sec per IP")
     print(f"   Max connections: {connection_config.max_connections}")
-    print(f"   Rate limiting is per-host (IP address)")
+    print("   Rate limiting is per-host (IP address)")
 
     # Create main host with rate limiting
     main_key_pair = create_new_key_pair(secrets.token_bytes(32))
     main_listen_addrs = get_available_interfaces(7200)
-    
+
     swarm = new_swarm(
         key_pair=main_key_pair,
         listen_addrs=main_listen_addrs,
-        connection_config=connection_config
+        connection_config=connection_config,
     )
     main_host = BasicHost(network=swarm)
 
@@ -72,44 +73,51 @@ async def example_basic_rate_limiting() -> None:
         for i, peer_host in enumerate(peer_hosts):
             listen_addrs = get_available_interfaces(7201 + i)
             await stack.enter_async_context(peer_host.run(listen_addrs=listen_addrs))
-        
+
         await trio.sleep(1)
-        
+
         main_addr = main_host.get_addrs()[0]
         main_peer_id = main_host.get_id()
-        
-        print(f"\n🔗 Attempting {NUM_PEERS} rapid connections (limit: {connection_config.inbound_connection_threshold}/sec)...")
-        print(f"   (All from same IP - localhost)")
-        
+
+        threshold = connection_config.inbound_connection_threshold
+        print(
+            f"\n🔗 Attempting {NUM_PEERS} rapid connections (limit: {threshold}/sec)..."
+        )
+        print("   (All from same IP - localhost)")
+
         allowed = 0
         rate_limited = 0
-        
+
         # Try to connect all peers rapidly
         for i, peer_host in enumerate(peer_hosts):
             try:
                 peer_info = PeerInfo(main_peer_id, [main_addr])
                 await peer_host.connect(peer_info)
                 allowed += 1
-                print(f"   ✅ Peer {i+1}: Connected")
+                print(f"   ✅ Peer {i + 1}: Connected")
             except Exception as e:
                 error_msg = str(e).lower()
                 if "rate limit" in error_msg:
                     rate_limited += 1
-                    print(f"   ⚠️  Peer {i+1}: Rate limited")
+                    print(f"   ⚠️  Peer {i + 1}: Rate limited")
                 else:
-                    print(f"   ❌ Peer {i+1}: Failed - {str(e)[:40]}")
+                    print(f"   ❌ Peer {i + 1}: Failed - {str(e)[:40]}")
             # Small delay to see rate limiting in action
             await trio.sleep(0.1)
-        
+
         await trio.sleep(0.5)
-        
-        print(f"\n📊 Results:")
+
+        print("\n📊 Results:")
         print(f"   Allowed: {allowed}")
         print(f"   Rate limited: {rate_limited}")
-        print(f"   ✅ Rate limiting working: Only {connection_config.inbound_connection_threshold} connections/sec allowed per IP")
-        
+        threshold = connection_config.inbound_connection_threshold
+        print(
+            f"   ✅ Rate limiting working: Only {threshold} "
+            f"connections/sec allowed per IP"
+        )
+
         await trio.sleep(0.5)
-    
+
     print("✅ Basic rate limiting demo completed\n")
 
 
@@ -124,20 +132,21 @@ async def example_rate_limit_behavior() -> None:
         max_connections=10,
     )
 
-    print(f"\n📋 Rate Limiting Behavior:")
-    print(f"   - Tracks connection attempts per IP address")
-    print(f"   - Time window: 1 second (sliding window)")
-    print(f"   - Threshold: {connection_config.inbound_connection_threshold} connections/sec")
-    print(f"   - Resets automatically after time window")
+    print("\n📋 Rate Limiting Behavior:")
+    print("   - Tracks connection attempts per IP address")
+    print("   - Time window: 1 second (sliding window)")
+    threshold = connection_config.inbound_connection_threshold
+    print(f"   - Threshold: {threshold} connections/sec")
+    print("   - Resets automatically after time window")
 
     # Create main host
     main_key_pair = create_new_key_pair(secrets.token_bytes(32))
     main_listen_addrs = get_available_interfaces(7210)
-    
+
     swarm = new_swarm(
         key_pair=main_key_pair,
         listen_addrs=main_listen_addrs,
-        connection_config=connection_config
+        connection_config=connection_config,
     )
     main_host = BasicHost(network=swarm)
 
@@ -154,36 +163,36 @@ async def example_rate_limit_behavior() -> None:
         for i, peer_host in enumerate(peer_hosts):
             listen_addrs = get_available_interfaces(7211 + i)
             await stack.enter_async_context(peer_host.run(listen_addrs=listen_addrs))
-        
+
         await trio.sleep(1)
-        
+
         main_addr = main_host.get_addrs()[0]
         main_peer_id = main_host.get_id()
-        
-        print(f"\n🔗 Phase 1: Rapid connections (should hit rate limit)...")
+
+        print("\n🔗 Phase 1: Rapid connections (should hit rate limit)...")
         allowed_phase1 = 0
         rate_limited_phase1 = 0
-        
+
         for i, peer_host in enumerate(peer_hosts[:3]):
             try:
                 peer_info = PeerInfo(main_peer_id, [main_addr])
                 await peer_host.connect(peer_info)
                 allowed_phase1 += 1
-                print(f"   ✅ Peer {i+1}: Connected")
+                print(f"   ✅ Peer {i + 1}: Connected")
             except Exception as e:
                 if "rate limit" in str(e).lower():
                     rate_limited_phase1 += 1
-                    print(f"   ⚠️  Peer {i+1}: Rate limited")
+                    print(f"   ⚠️  Peer {i + 1}: Rate limited")
                 else:
-                    print(f"   ❌ Peer {i+1}: Failed")
+                    print(f"   ❌ Peer {i + 1}: Failed")
             await trio.sleep(0.1)
-        
-        print(f"\n⏱️  Waiting 1.5 seconds for rate limit window to reset...")
+
+        print("\n⏱️  Waiting 1.5 seconds for rate limit window to reset...")
         await trio.sleep(1.5)
-        
-        print(f"\n🔗 Phase 2: Connections after reset (should succeed)...")
+
+        print("\n🔗 Phase 2: Connections after reset (should succeed)...")
         allowed_phase2 = 0
-        
+
         for i, peer_host in enumerate(peer_hosts[2:], start=3):
             try:
                 peer_info = PeerInfo(main_peer_id, [main_addr])
@@ -193,14 +202,17 @@ async def example_rate_limit_behavior() -> None:
             except Exception as e:
                 print(f"   ❌ Peer {i}: Failed - {str(e)[:40]}")
             await trio.sleep(0.1)
-        
-        print(f"\n📊 Results:")
-        print(f"   Phase 1 (rapid): {allowed_phase1} allowed, {rate_limited_phase1} rate limited")
+
+        print("\n📊 Results:")
+        print(
+            f"   Phase 1 (rapid): {allowed_phase1} allowed, "
+            f"{rate_limited_phase1} rate limited"
+        )
         print(f"   Phase 2 (after reset): {allowed_phase2} allowed")
-        print(f"   ✅ Rate limit resets after time window")
-        
+        print("   ✅ Rate limit resets after time window")
+
         await trio.sleep(0.5)
-    
+
     print("✅ Rate limit behavior demo completed\n")
 
 
@@ -210,8 +222,8 @@ async def example_custom_rate_limits() -> None:
     print("Example 3: Custom Rate Limit Configurations")
     print("=" * 60)
 
-    print(f"\n📋 Configuration Scenarios:")
-    
+    print("\n📋 Configuration Scenarios:")
+
     # High-traffic scenario
     high_traffic_config = ConnectionConfig(
         inbound_connection_threshold=20,  # Higher threshold
@@ -219,10 +231,11 @@ async def example_custom_rate_limits() -> None:
         max_connections=100,
     )
 
-    print(f"\n🚀 High-Traffic Configuration:")
-    print(f"   Threshold: {high_traffic_config.inbound_connection_threshold} connections/sec")
+    print("\n🚀 High-Traffic Configuration:")
+    threshold = high_traffic_config.inbound_connection_threshold
+    print(f"   Threshold: {threshold} connections/sec")
     print(f"   Max pending: {high_traffic_config.max_incoming_pending_connections}")
-    print(f"   Use case: Public nodes, high-traffic networks")
+    print("   Use case: Public nodes, high-traffic networks")
 
     # Low-traffic scenario
     low_traffic_config = ConnectionConfig(
@@ -231,10 +244,11 @@ async def example_custom_rate_limits() -> None:
         max_connections=20,
     )
 
-    print(f"\n🔒 Low-Traffic Configuration:")
-    print(f"   Threshold: {low_traffic_config.inbound_connection_threshold} connections/sec")
+    print("\n🔒 Low-Traffic Configuration:")
+    threshold = low_traffic_config.inbound_connection_threshold
+    print(f"   Threshold: {threshold} connections/sec")
     print(f"   Max pending: {low_traffic_config.max_incoming_pending_connections}")
-    print(f"   Use case: Private networks, security-focused")
+    print("   Use case: Private networks, security-focused")
 
     # Production scenario
     production_config = ConnectionConfig(
@@ -243,27 +257,28 @@ async def example_custom_rate_limits() -> None:
         max_connections=300,
     )
 
-    print(f"\n⚙️  Production Configuration (Default):")
-    print(f"   Threshold: {production_config.inbound_connection_threshold} connections/sec")
+    print("\n⚙️  Production Configuration (Default):")
+    threshold = production_config.inbound_connection_threshold
+    print(f"   Threshold: {threshold} connections/sec")
     print(f"   Max pending: {production_config.max_incoming_pending_connections}")
-    print(f"   Use case: Balanced security and usability")
+    print("   Use case: Balanced security and usability")
 
-    print(f"\n💡 Rate Limit Selection Guidelines:")
-    print(f"   ✅ Consider expected traffic patterns")
-    print(f"   ✅ Balance security vs. usability")
-    print(f"   ✅ Monitor and adjust based on metrics")
-    print(f"   ✅ Higher for public nodes, lower for private")
+    print("\n💡 Rate Limit Selection Guidelines:")
+    print("   ✅ Consider expected traffic patterns")
+    print("   ✅ Balance security vs. usability")
+    print("   ✅ Monitor and adjust based on metrics")
+    print("   ✅ Higher for public nodes, lower for private")
 
     # Demonstrate low-traffic config in action
-    print(f"\n🧪 Testing Low-Traffic Configuration:")
-    
+    print("\n🧪 Testing Low-Traffic Configuration:")
+
     main_key_pair = create_new_key_pair(secrets.token_bytes(32))
     main_listen_addrs = get_available_interfaces(7220)
-    
+
     swarm = new_swarm(
         key_pair=main_key_pair,
         listen_addrs=main_listen_addrs,
-        connection_config=low_traffic_config
+        connection_config=low_traffic_config,
     )
     main_host = BasicHost(network=swarm)
 
@@ -279,34 +294,35 @@ async def example_custom_rate_limits() -> None:
         for i, peer_host in enumerate(peer_hosts):
             listen_addrs = get_available_interfaces(7221 + i)
             await stack.enter_async_context(peer_host.run(listen_addrs=listen_addrs))
-        
+
         await trio.sleep(1)
-        
+
         main_addr = main_host.get_addrs()[0]
         main_peer_id = main_host.get_id()
-        
+
         allowed = 0
         rate_limited = 0
-        
+
         for i, peer_host in enumerate(peer_hosts):
             try:
                 peer_info = PeerInfo(main_peer_id, [main_addr])
                 await peer_host.connect(peer_info)
                 allowed += 1
-                print(f"   ✅ Peer {i+1}: Connected")
+                print(f"   ✅ Peer {i + 1}: Connected")
             except Exception as e:
                 if "rate limit" in str(e).lower():
                     rate_limited += 1
-                    print(f"   ⚠️  Peer {i+1}: Rate limited")
+                    print(f"   ⚠️  Peer {i + 1}: Rate limited")
                 else:
-                    print(f"   ❌ Peer {i+1}: Failed")
+                    print(f"   ❌ Peer {i + 1}: Failed")
             await trio.sleep(0.1)
-        
-        print(f"\n📊 Results (threshold={low_traffic_config.inbound_connection_threshold}/sec):")
+
+        threshold = low_traffic_config.inbound_connection_threshold
+        print(f"\n📊 Results (threshold={threshold}/sec):")
         print(f"   Allowed: {allowed}, Rate limited: {rate_limited}")
-        
+
         await trio.sleep(0.5)
-    
+
     print("✅ Custom rate limits demo completed\n")
 
 
@@ -322,18 +338,19 @@ async def example_rate_limit_exceeded() -> None:
         max_connections=10,
     )
 
-    print(f"\n📋 Configuration:")
-    print(f"   Rate limit: {connection_config.inbound_connection_threshold} connection/sec per IP")
-    print(f"   This protects against connection flooding attacks")
+    print("\n📋 Configuration:")
+    threshold = connection_config.inbound_connection_threshold
+    print(f"   Rate limit: {threshold} connection/sec per IP")
+    print("   This protects against connection flooding attacks")
 
     # Create main host
     main_key_pair = create_new_key_pair(secrets.token_bytes(32))
     main_listen_addrs = get_available_interfaces(7230)
-    
+
     swarm = new_swarm(
         key_pair=main_key_pair,
         listen_addrs=main_listen_addrs,
-        connection_config=connection_config
+        connection_config=connection_config,
     )
     main_host = BasicHost(network=swarm)
 
@@ -351,58 +368,60 @@ async def example_rate_limit_exceeded() -> None:
         for i, peer_host in enumerate(peer_hosts):
             listen_addrs = get_available_interfaces(7231 + i)
             await stack.enter_async_context(peer_host.run(listen_addrs=listen_addrs))
-        
+
         await trio.sleep(1)
-        
+
         main_addr = main_host.get_addrs()[0]
         main_peer_id = main_host.get_id()
-        
-        print(f"\n🔗 Simulating Connection Flooding Attack:")
+
+        print("\n🔗 Simulating Connection Flooding Attack:")
         print(f"   Attempting {NUM_PEERS} rapid connections from same IP...")
-        print(f"   (Only {connection_config.inbound_connection_threshold} should succeed)")
-        
+        print(
+            f"   (Only {connection_config.inbound_connection_threshold} should succeed)"
+        )
+
         allowed = 0
         blocked = 0
-        
+
         # Try to flood with rapid connections
         for i, peer_host in enumerate(peer_hosts):
             try:
                 peer_info = PeerInfo(main_peer_id, [main_addr])
                 await peer_host.connect(peer_info)
                 allowed += 1
-                print(f"   ✅ Peer {i+1}: Connected")
+                print(f"   ✅ Peer {i + 1}: Connected")
             except Exception as e:
                 error_msg = str(e).lower()
                 if "rate limit" in error_msg:
                     blocked += 1
-                    print(f"   🛡️  Peer {i+1}: Blocked by rate limiter")
+                    print(f"   🛡️  Peer {i + 1}: Blocked by rate limiter")
                 else:
-                    print(f"   ❌ Peer {i+1}: Failed - {str(e)[:40]}")
+                    print(f"   ❌ Peer {i + 1}: Failed - {str(e)[:40]}")
             # Very small delay to simulate rapid flooding
             await trio.sleep(0.05)
-        
+
         await trio.sleep(0.5)
-        
-        print(f"\n📊 Protection Results:")
+
+        print("\n📊 Protection Results:")
         print(f"   Allowed: {allowed}/{NUM_PEERS}")
         print(f"   Blocked: {blocked}/{NUM_PEERS}")
-        print(f"   ✅ Rate limiting successfully prevented flooding")
-        
+        print("   ✅ Rate limiting successfully prevented flooding")
+
         # Show rate limiter status
-        rate_limiter = swarm.rate_limiter
-        print(f"\n🔍 Rate Limiter Details:")
-        print(f"   Threshold: {connection_config.inbound_connection_threshold} connections/sec")
-        print(f"   Time window: 1 second (sliding window)")
-        print(f"   Protection: Per IP address")
-        
-        print(f"\n💡 When Rate Limit is Exceeded:")
-        print(f"   ✅ Connection attempts rejected immediately")
-        print(f"   ✅ No connection is established")
-        print(f"   ✅ Rate limiter resets after time window")
-        print(f"   ✅ Protects against connection flooding attacks")
-        
+        print("\n🔍 Rate Limiter Details:")
+        threshold = connection_config.inbound_connection_threshold
+        print(f"   Threshold: {threshold} connections/sec")
+        print("   Time window: 1 second (sliding window)")
+        print("   Protection: Per IP address")
+
+        print("\n💡 When Rate Limit is Exceeded:")
+        print("   ✅ Connection attempts rejected immediately")
+        print("   ✅ No connection is established")
+        print("   ✅ Rate limiter resets after time window")
+        print("   ✅ Protects against connection flooding attacks")
+
         await trio.sleep(0.5)
-    
+
     print("✅ Rate limit exceeded demo completed\n")
 
 
@@ -425,6 +444,7 @@ async def main() -> None:
     except Exception as e:
         print(f"\n❌ Example failed: {e}")
         import traceback
+
         traceback.print_exc()
         raise
 

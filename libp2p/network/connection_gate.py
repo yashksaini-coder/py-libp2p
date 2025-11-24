@@ -9,7 +9,6 @@ Reference: https://github.com/libp2p/js-libp2p/blob/main/packages/libp2p/src/con
 
 import ipaddress
 import logging
-from typing import TYPE_CHECKING
 
 from multiaddr import Multiaddr
 

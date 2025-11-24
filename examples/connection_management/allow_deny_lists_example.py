@@ -40,16 +40,17 @@ async def example_allow_list() -> None:
 
     # Get the actual IP we'll be using (from localhost)
     import socket
+
     hostname = socket.gethostname()
     local_ip = socket.gethostbyname(hostname)
     # Fallback to common local IPs
     if local_ip.startswith("127."):
         local_ip = "127.0.0.1"
-    
-    print(f"\n📋 Configuration:")
+
+    print("\n📋 Configuration:")
     print(f"   Allow list: ['{local_ip}/32', '127.0.0.1/32']")
-    print(f"   Only connections from these IPs will be allowed")
-    
+    print("   Only connections from these IPs will be allowed")
+
     # Configure allow list with actual local IP
     connection_config = ConnectionConfig(
         allow_list=[
@@ -62,11 +63,11 @@ async def example_allow_list() -> None:
     # Create main host with allow list
     main_key_pair = create_new_key_pair(secrets.token_bytes(32))
     main_listen_addrs = get_available_interfaces(7100)
-    
+
     swarm = new_swarm(
         key_pair=main_key_pair,
         listen_addrs=main_listen_addrs,
-        connection_config=connection_config
+        connection_config=connection_config,
     )
     main_host = BasicHost(network=swarm)
 
@@ -83,33 +84,33 @@ async def example_allow_list() -> None:
         for i, peer_host in enumerate(peer_hosts):
             listen_addrs = get_available_interfaces(7101 + i)
             await stack.enter_async_context(peer_host.run(listen_addrs=listen_addrs))
-        
+
         await trio.sleep(1)
-        
+
         main_addr = main_host.get_addrs()[0]
         main_peer_id = main_host.get_id()
-        
-        print(f"\n🔗 Testing connections with allow list...")
-        print(f"   (All connections from localhost should be allowed)")
-        
+
+        print("\n🔗 Testing connections with allow list...")
+        print("   (All connections from localhost should be allowed)")
+
         allowed = 0
         for i, peer_host in enumerate(peer_hosts):
             try:
                 peer_info = PeerInfo(main_peer_id, [main_addr])
                 await peer_host.connect(peer_info)
                 allowed += 1
-                print(f"   ✅ Peer {i+1}: Allowed (IP in allow list)")
+                print(f"   ✅ Peer {i + 1}: Allowed (IP in allow list)")
             except Exception as e:
-                print(f"   ❌ Peer {i+1}: Denied - {e}")
-        
+                print(f"   ❌ Peer {i + 1}: Denied - {e}")
+
         await trio.sleep(0.5)
-        
-        print(f"\n📊 Results:")
+
+        print("\n📊 Results:")
         print(f"   Allowed: {allowed}/{len(peer_hosts)}")
-        print(f"   ✅ Allow list is working: Connections from allowed IPs succeed")
-        
+        print("   ✅ Allow list is working: Connections from allowed IPs succeed")
+
         await trio.sleep(0.5)
-    
+
     print("✅ Allow list demo completed\n")
 
 
@@ -120,15 +121,16 @@ async def example_deny_list() -> None:
     print("=" * 60)
 
     import socket
+
     hostname = socket.gethostname()
     local_ip = socket.gethostbyname(hostname)
     if local_ip.startswith("127."):
         local_ip = "127.0.0.1"
-    
-    print(f"\n📋 Configuration:")
+
+    print("\n📋 Configuration:")
     print(f"   Deny list: ['{local_ip}/32', '127.0.0.1/32']")
-    print(f"   Connections from these IPs will be blocked")
-    
+    print("   Connections from these IPs will be blocked")
+
     # Configure deny list with actual local IP
     connection_config = ConnectionConfig(
         deny_list=[
@@ -141,11 +143,11 @@ async def example_deny_list() -> None:
     # Create main host with deny list
     main_key_pair = create_new_key_pair(secrets.token_bytes(32))
     main_listen_addrs = get_available_interfaces(7110)
-    
+
     swarm = new_swarm(
         key_pair=main_key_pair,
         listen_addrs=main_listen_addrs,
-        connection_config=connection_config
+        connection_config=connection_config,
     )
     main_host = BasicHost(network=swarm)
 
@@ -162,37 +164,44 @@ async def example_deny_list() -> None:
         for i, peer_host in enumerate(peer_hosts):
             listen_addrs = get_available_interfaces(7111 + i)
             await stack.enter_async_context(peer_host.run(listen_addrs=listen_addrs))
-        
+
         await trio.sleep(1)
-        
+
         main_addr = main_host.get_addrs()[0]
         main_peer_id = main_host.get_id()
-        
-        print(f"\n🔗 Testing connections with deny list...")
-        print(f"   (All connections from localhost should be denied)")
-        
+
+        print("\n🔗 Testing connections with deny list...")
+        print("   (All connections from localhost should be denied)")
+
         denied = 0
         for i, peer_host in enumerate(peer_hosts):
             try:
                 peer_info = PeerInfo(main_peer_id, [main_addr])
                 await peer_host.connect(peer_info)
-                print(f"   ⚠️  Peer {i+1}: Connected (unexpected - IP should be denied)")
+                print(
+                    f"   ⚠️  Peer {i + 1}: Connected (unexpected - IP should be denied)"
+                )
             except Exception as e:
                 denied += 1
                 error_msg = str(e)
-                if "connection gate" in error_msg.lower() or "denied" in error_msg.lower():
-                    print(f"   ✅ Peer {i+1}: Denied by connection gate (as expected)")
+                if (
+                    "connection gate" in error_msg.lower()
+                    or "denied" in error_msg.lower()
+                ):
+                    print(
+                        f"   ✅ Peer {i + 1}: Denied by connection gate (as expected)"
+                    )
                 else:
-                    print(f"   ❌ Peer {i+1}: Failed - {error_msg[:50]}")
-        
+                    print(f"   ❌ Peer {i + 1}: Failed - {error_msg[:50]}")
+
         await trio.sleep(0.5)
-        
-        print(f"\n📊 Results:")
+
+        print("\n📊 Results:")
         print(f"   Denied: {denied}/{len(peer_hosts)}")
-        print(f"   ✅ Deny list is working: Connections from denied IPs are blocked")
-        
+        print("   ✅ Deny list is working: Connections from denied IPs are blocked")
+
         await trio.sleep(0.5)
-    
+
     print("✅ Deny list demo completed\n")
 
 
@@ -202,37 +211,41 @@ async def example_cidr_blocks() -> None:
     print("Example 3: CIDR Blocks")
     print("=" * 60)
 
-    print(f"\n📋 CIDR Block Examples:")
-    print(f"   /32: Single IP address (e.g., 192.168.1.100/32)")
-    print(f"   /24: 256 addresses (e.g., 192.168.1.0/24)")
-    print(f"   /16: 65,536 addresses (e.g., 192.168.0.0/16)")
-    print(f"   /8:  16,777,216 addresses (e.g., 10.0.0.0/8)")
-    
+    print("\n📋 CIDR Block Examples:")
+    print("   /32: Single IP address (e.g., 192.168.1.100/32)")
+    print("   /24: 256 addresses (e.g., 192.168.1.0/24)")
+    print("   /16: 65,536 addresses (e.g., 192.168.0.0/16)")
+    print("   /8:  16,777,216 addresses (e.g., 10.0.0.0/8)")
+
     # Demonstrate CIDR parsing and checking
-    from libp2p.network.connection_gate import ConnectionGate
     from multiaddr import Multiaddr
-    
+
     gate = ConnectionGate(
         allow_list=["192.168.0.0/16", "127.0.0.0/8"],
         deny_list=["192.168.1.100/32"],
     )
-    
-    print(f"\n🧪 Testing CIDR Block Matching:")
-    
+
+    print("\n🧪 Testing CIDR Block Matching:")
+
     test_cases = [
         ("/ip4/192.168.1.50/tcp/4001", "192.168.0.0/16", True, "In /16 range"),
-        ("/ip4/192.168.1.100/tcp/4001", "192.168.1.100/32", False, "Denied by deny list"),
+        (
+            "/ip4/192.168.1.100/tcp/4001",
+            "192.168.1.100/32",
+            False,
+            "Denied by deny list",
+        ),
         ("/ip4/127.0.0.1/tcp/4001", "127.0.0.0/8", True, "In /8 range"),
         ("/ip4/10.0.0.1/tcp/4001", None, False, "Not in allow list"),
     ]
-    
+
     for addr_str, expected_range, should_allow, description in test_cases:
         addr = Multiaddr(addr_str)
         is_allowed = gate.is_allowed(addr)
         status = "✅" if is_allowed == should_allow else "❌"
         result = "ALLOWED" if is_allowed else "DENIED"
         print(f"   {status} {addr_str[:30]:<30} → {result:6} ({description})")
-    
+
     print("✅ CIDR blocks demo completed\n")
 
 
@@ -242,49 +255,48 @@ async def example_precedence_rules() -> None:
     print("Example 4: Precedence Rules")
     print("=" * 60)
 
-    print(f"\n📋 Precedence Rules:")
-    print(f"   1. Deny list checked FIRST (highest priority)")
-    print(f"   2. If IP in deny list → REJECTED")
-    print(f"   3. If IP in allow list → ALLOWED")
-    print(f"   4. Otherwise → Normal rules apply")
-    
+    print("\n📋 Precedence Rules:")
+    print("   1. Deny list checked FIRST (highest priority)")
+    print("   2. If IP in deny list → REJECTED")
+    print("   3. If IP in allow list → ALLOWED")
+    print("   4. Otherwise → Normal rules apply")
+
     # Demonstrate precedence with connection gate
-    from libp2p.network.connection_gate import ConnectionGate
     from multiaddr import Multiaddr
-    
+
     # IP that's in both lists
     test_ip = "192.168.1.100"
-    
+
     gate = ConnectionGate(
         allow_list=["192.168.1.0/24"],  # Includes 192.168.1.100
         deny_list=[f"{test_ip}/32"],  # Explicitly denies 192.168.1.100
     )
-    
-    print(f"\n🧪 Testing Precedence:")
+
+    print("\n🧪 Testing Precedence:")
     print(f"   IP: {test_ip}")
-    print(f"   In allow list: 192.168.1.0/24 → YES")
+    print("   In allow list: 192.168.1.0/24 → YES")
     print(f"   In deny list: {test_ip}/32 → YES")
-    
+
     test_addr = Multiaddr(f"/ip4/{test_ip}/tcp/4001")
     is_allowed = gate.is_allowed(test_addr)
-    
-    print(f"\n📊 Result:")
+
+    print("\n📊 Result:")
     if is_allowed:
-        print(f"   ⚠️  ALLOWED (unexpected - deny should take precedence)")
+        print("   ⚠️  ALLOWED (unexpected - deny should take precedence)")
     else:
-        print(f"   ✅ DENIED (deny list takes precedence over allow list)")
-    
+        print("   ✅ DENIED (deny list takes precedence over allow list)")
+
     # Test IP only in allow list
     test_ip2 = "192.168.1.50"
     test_addr2 = Multiaddr(f"/ip4/{test_ip2}/tcp/4001")
     is_allowed2 = gate.is_allowed(test_addr2)
-    
-    print(f"\n🧪 Testing IP only in allow list:")
+
+    print("\n🧪 Testing IP only in allow list:")
     print(f"   IP: {test_ip2}")
-    print(f"   In allow list: YES")
-    print(f"   In deny list: NO")
+    print("   In allow list: YES")
+    print("   In deny list: NO")
     print(f"   Result: {'✅ ALLOWED' if is_allowed2 else '❌ DENIED'}")
-    
+
     print("✅ Precedence rules demo completed\n")
 
 
@@ -295,11 +307,12 @@ async def example_production_configuration() -> None:
     print("=" * 60)
 
     import socket
+
     hostname = socket.gethostname()
     local_ip = socket.gethostbyname(hostname)
     if local_ip.startswith("127."):
         local_ip = "127.0.0.1"
-    
+
     # Extract network from IP (simplified - in production use actual network)
     if local_ip.startswith("192.168."):
         network_base = "192.168.0.0/16"
@@ -307,13 +320,13 @@ async def example_production_configuration() -> None:
         network_base = "10.0.0.0/8"
     else:
         network_base = "127.0.0.0/8"
-    
-    print(f"\n📋 Production Configuration Example:")
+
+    print("\n📋 Production Configuration Example:")
     print(f"   Allow list: ['{network_base}']  # Trusted internal network")
-    print(f"   Deny list: []  # Add known malicious IPs here")
-    print(f"   Max connections: 300")
-    print(f"   Rate limit: 5/sec")
-    
+    print("   Deny list: []  # Add known malicious IPs here")
+    print("   Max connections: 300")
+    print("   Rate limit: 5/sec")
+
     # Production configuration
     connection_config = ConnectionConfig(
         allow_list=[network_base],
@@ -321,18 +334,18 @@ async def example_production_configuration() -> None:
         max_connections=300,
         inbound_connection_threshold=5,
     )
-    
+
     # Create host with production config
     main_key_pair = create_new_key_pair(secrets.token_bytes(32))
     main_listen_addrs = get_available_interfaces(7120)
-    
+
     swarm = new_swarm(
         key_pair=main_key_pair,
         listen_addrs=main_listen_addrs,
-        connection_config=connection_config
+        connection_config=connection_config,
     )
     main_host = BasicHost(network=swarm)
-    
+
     # Create peer hosts
     peer_hosts = []
     for i in range(2):
@@ -340,50 +353,50 @@ async def example_production_configuration() -> None:
         listen_addrs = get_available_interfaces(7121 + i)
         host = new_host(key_pair=key_pair, listen_addrs=listen_addrs)
         peer_hosts.append(host)
-    
+
     async with contextlib.AsyncExitStack() as stack:
         await stack.enter_async_context(main_host.run(listen_addrs=main_listen_addrs))
         for i, peer_host in enumerate(peer_hosts):
             listen_addrs = get_available_interfaces(7121 + i)
             await stack.enter_async_context(peer_host.run(listen_addrs=listen_addrs))
-        
+
         await trio.sleep(1)
-        
+
         main_addr = main_host.get_addrs()[0]
         main_peer_id = main_host.get_id()
-        
-        print(f"\n🔗 Testing production configuration...")
-        
+
+        print("\n🔗 Testing production configuration...")
+
         for i, peer_host in enumerate(peer_hosts):
             try:
                 peer_info = PeerInfo(main_peer_id, [main_addr])
                 await peer_host.connect(peer_info)
-                print(f"   ✅ Peer {i+1}: Connected (IP in allow list)")
+                print(f"   ✅ Peer {i + 1}: Connected (IP in allow list)")
             except Exception as e:
                 error_msg = str(e)
                 if "connection gate" in error_msg.lower():
-                    print(f"   ❌ Peer {i+1}: Denied by connection gate")
+                    print(f"   ❌ Peer {i + 1}: Denied by connection gate")
                 else:
-                    print(f"   ❌ Peer {i+1}: Failed - {error_msg[:40]}")
-        
+                    print(f"   ❌ Peer {i + 1}: Failed - {error_msg[:40]}")
+
         await trio.sleep(0.5)
-        
+
         # Show connection gate status
         gate = swarm.connection_gate
-        print(f"\n📊 Connection Gate Status:")
+        print("\n📊 Connection Gate Status:")
         print(f"   Allow list entries: {len(gate.allow_list)}")
         print(f"   Deny list entries: {len(gate.deny_list)}")
         print(f"   Active connections: {swarm.get_total_connections()}")
-        
-        print(f"\n💡 Best Practices:")
-        print(f"   ✅ Keep allow lists small and specific")
-        print(f"   ✅ Regularly update deny lists")
-        print(f"   ✅ Use CIDR blocks for network ranges")
-        print(f"   ✅ Monitor connection attempts")
-        print(f"   ✅ Combine with connection limits and rate limiting")
-        
+
+        print("\n💡 Best Practices:")
+        print("   ✅ Keep allow lists small and specific")
+        print("   ✅ Regularly update deny lists")
+        print("   ✅ Use CIDR blocks for network ranges")
+        print("   ✅ Monitor connection attempts")
+        print("   ✅ Combine with connection limits and rate limiting")
+
         await trio.sleep(0.5)
-    
+
     print("✅ Production configuration demo completed\n")
 
 
@@ -407,6 +420,7 @@ async def main() -> None:
     except Exception as e:
         print(f"\n❌ Example failed: {e}")
         import traceback
+
         traceback.print_exc()
         raise
 
