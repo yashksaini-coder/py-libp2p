@@ -342,11 +342,15 @@ class PeerStore(IPeerStore):
         if existing and existing.seq > record.seq:
             return False  # reject older record
 
-        new_addrs = set(record.addrs)
-
         self.peer_record_map[peer_id] = PeerRecordState(envelope, record.seq)
         self.peer_data_map[peer_id].clear_addrs()
-        self.add_addrs(peer_id, list(new_addrs), ttl)
+        # record.addrs is already a list[Multiaddr], pass it directly to add_addrs
+        self.add_addrs(peer_id, record.addrs, ttl)
+        # Since Multiaddr is unhashable, we can deduplicate using string representation
+        unique_addrs_map = {str(addr): addr for addr in record.addrs}
+        unique_addrs_list = list(unique_addrs_map.values())
+
+        self.add_addrs(peer_id, unique_addrs_list, ttl)
 
         return True
 
