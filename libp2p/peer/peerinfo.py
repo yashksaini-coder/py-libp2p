@@ -39,9 +39,7 @@ def info_from_p2p_addr(addr: multiaddr.Multiaddr) -> PeerInfo:
 
     protocols = addr.protocols()
     if not protocols:
-        raise InvalidAddrError(
-            f"`addr`={addr} should at least have a protocol `P_P2P`"
-        )
+        raise InvalidAddrError(f"`addr`={addr} should at least have a protocol `P_P2P`")
 
     last_protocol = cast(Protocol, protocols[-1])
 

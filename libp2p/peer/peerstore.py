@@ -74,14 +74,15 @@ def env_to_send_in_RPC(host: IHost) -> tuple[bytes, bool]:
         one was reused (False).
 
     """
-    listen_addrs_set = {addr for addr in host.get_addrs()}
+    listen_addrs_set = {str(addr) for addr in host.get_addrs()}
     local_env = host.get_peerstore().get_local_record()
 
     if local_env is None:
         # No cached SPR yet -> create one
         return issue_and_cache_local_record(host), True
     else:
-        record_addrs_set = local_env._env_addrs_set()
+        # Compare using string representation of addresses
+        record_addrs_set = {str(addr) for addr in local_env._env_addrs_set()}
         if record_addrs_set == listen_addrs_set:
             # Perfect match -> reuse cached envelope
             return local_env.marshal_envelope(), False

@@ -5,16 +5,15 @@ from contextlib import (
     asynccontextmanager,
 )
 
-import multiaddr
 from multiaddr import (
     Multiaddr,
+)
+from multiaddr.exceptions import (
+    ProtocolLookupError,
 )
 from multiaddr.protocols import (
     P_IP4,
     P_TCP,
-)
-from multiaddr.exceptions import (
-    ProtocolLookupError,
 )
 from p2pclient import (
     Client,

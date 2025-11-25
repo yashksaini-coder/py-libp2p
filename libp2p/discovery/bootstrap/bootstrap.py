@@ -1,6 +1,7 @@
 import logging
 
 from multiaddr import Multiaddr
+from multiaddr.protocols import P_P2P
 from multiaddr.resolvers import DNSResolver
 import trio
 
@@ -10,7 +11,6 @@ from libp2p.discovery.events.peerDiscovery import peerDiscovery
 from libp2p.network.exceptions import SwarmException
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.peer.peerstore import PERMANENT_ADDR_TTL
-from multiaddr.protocols import P_P2P
 
 logger = logging.getLogger("libp2p.discovery.bootstrap")
 resolver = DNSResolver()
