@@ -61,17 +61,19 @@ class TestQUICTransport:
         valid_addrs = []
 
         # Add draft-29 addresses (should work)
-        valid_addrs.extend([
-            multiaddr.Multiaddr(
-                f"/ip4/127.0.0.1/udp/4001/{QUICTransportConfig.PROTOCOL_QUIC_DRAFT29}"
-            ),
-            multiaddr.Multiaddr(
-                f"/ip4/192.168.1.1/udp/8080/{QUICTransportConfig.PROTOCOL_QUIC_DRAFT29}"
-            ),
-            multiaddr.Multiaddr(
-                f"/ip6/::1/udp/4001/{QUICTransportConfig.PROTOCOL_QUIC_DRAFT29}"
-            ),
-        ])
+        valid_addrs.extend(
+            [
+                multiaddr.Multiaddr(
+                    f"/ip4/127.0.0.1/udp/4001/{QUICTransportConfig.PROTOCOL_QUIC_DRAFT29}"
+                ),
+                multiaddr.Multiaddr(
+                    f"/ip4/192.168.1.1/udp/8080/{QUICTransportConfig.PROTOCOL_QUIC_DRAFT29}"
+                ),
+                multiaddr.Multiaddr(
+                    f"/ip6/::1/udp/4001/{QUICTransportConfig.PROTOCOL_QUIC_DRAFT29}"
+                ),
+            ]
+        )
 
         # Add quic-v1 addresses if supported by py-multiaddr
         # TODO: Update Multiaddr package to accept quic-v1

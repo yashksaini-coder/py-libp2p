@@ -237,7 +237,7 @@ class TestPeerRouting:
         mock_host.get_peerstore().addrs.return_value = [sample_peer_info.addrs[0]]
         mock_host.get_peerstore().add_addrs = Mock()
         # Mock env_to_send_in_RPC to return valid envelope bytes
-        with patch('libp2p.kad_dht.peer_routing.env_to_send_in_RPC') as mock_env:
+        with patch("libp2p.kad_dht.peer_routing.env_to_send_in_RPC") as mock_env:
             mock_env.return_value = (b"", False)
             result = await peer_routing._query_peer_for_closest(
                 sample_peer_info.peer_id, target_key
@@ -338,10 +338,10 @@ class TestPeerRouting:
             ]
             mock_host.get_peerstore().get_peer_record.return_value = None
             # Mock env_to_send_in_RPC and maybe_consume_signed_record
-            with patch('libp2p.kad_dht.peer_routing.env_to_send_in_RPC') as mock_env:
+            with patch("libp2p.kad_dht.peer_routing.env_to_send_in_RPC") as mock_env:
                 mock_env.return_value = (b"", False)
                 with patch(
-                    'libp2p.kad_dht.peer_routing.maybe_consume_signed_record'
+                    "libp2p.kad_dht.peer_routing.maybe_consume_signed_record"
                 ) as mock_consume:
                     mock_consume.return_value = True
                     await peer_routing._handle_kad_stream(mock_stream)
