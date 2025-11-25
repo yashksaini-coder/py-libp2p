@@ -10,6 +10,7 @@ from libp2p.discovery.events.peerDiscovery import peerDiscovery
 from libp2p.network.exceptions import SwarmException
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.peer.peerstore import PERMANENT_ADDR_TTL
+from multiaddr.protocols import P_P2P
 
 logger = logging.getLogger("libp2p.discovery.bootstrap")
 resolver = DNSResolver()
@@ -104,7 +105,7 @@ class BootstrapDiscovery:
                     logger.warning(f"DNS resolution returned None for: {addr_str}")
                     return
 
-                peer_id_str = multiaddr.get_peer_id()
+                peer_id_str = multiaddr.value_for_protocol(P_P2P)
                 if peer_id_str is None:
                     logger.warning(f"Missing peer ID in DNS address: {addr_str}")
                     return
