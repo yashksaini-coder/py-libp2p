@@ -1616,8 +1616,7 @@ async def test_websocket_transport_can_dial():
         maddr = Multiaddr(addr_str)
         # All these should be valid WebSocket multiaddrs
         assert is_valid_websocket_multiaddr(maddr), (
-            f"Address {addr_str} should be valid"
-        )
+            f"Address {addr_str} should be valid"      )
 
     # Test invalid addresses that should not be dialable
     invalid_addresses = [
