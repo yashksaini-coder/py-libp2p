@@ -532,12 +532,9 @@ class BasicHost(IHost):
 
             communicator = MultiselectCommunicator(net_stream)
             selected_protocol = await self.multiselect_client.select_one_of(
-                list(protocol_ids),
-                MultiselectCommunicator(net_stream),
-                negotiate_timeout,
                 protocol_choices,
                 communicator,
-                self.negotiate_timeout,
+                negotiate_timeout,
             )
         except MultiselectClientError as error:
             # Enhanced error logging for debugging
@@ -887,10 +884,6 @@ class BasicHost(IHost):
             if config_timeout > 0:
                 negotiate_timeout = config_timeout
 
-        try:
-            protocol, handler = await self.multiselect.negotiate(
-                MultiselectCommunicator(net_stream), negotiate_timeout
-            )
         # For QUIC connections, use connection-level semaphore to limit
         # concurrent negotiations and prevent server-side overload
         # This matches the client-side protection for symmetric behavior
@@ -916,12 +909,12 @@ class BasicHost(IHost):
                 semaphore_to_use = server_semaphore or negotiation_semaphore
                 async with semaphore_to_use:
                     protocol, handler = await self.multiselect.negotiate(
-                        MultiselectCommunicator(net_stream), self.negotiate_timeout
+                        MultiselectCommunicator(net_stream), negotiate_timeout
                     )
             else:
                 # For non-QUIC connections, negotiate directly (no semaphore needed)
                 protocol, handler = await self.multiselect.negotiate(
-                    MultiselectCommunicator(net_stream), self.negotiate_timeout
+                    MultiselectCommunicator(net_stream), negotiate_timeout
                 )
             if protocol is None:
                 await net_stream.reset()
