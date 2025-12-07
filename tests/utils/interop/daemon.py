@@ -15,7 +15,7 @@ from multiaddr.protocols import (
     P_IP4,
     P_TCP,
 )
-from p2pclient import (
+from p2pclient import (  # type: ignore[import-error]
     Client,
 )
 import trio
