@@ -27,7 +27,6 @@ async def run_demo() -> None:
 
     print("  PART 1: ConnectionGate - IP Allow/Deny Lists")
 
-
     # Create a ConnectionGate with deny list
     gate = ConnectionGate(
         deny_list=["192.168.1.100", "10.0.0.0/8"],
@@ -62,17 +61,15 @@ async def run_demo() -> None:
 
     print("  PART 2: Real Host Connections")
 
-
     # Create 3 hosts
-    host_a, host_b, host_c = [
+    host_a, host_b, host_c = (
         new_host(key_pair=create_new_key_pair(secrets.token_bytes(32)))
         for _ in range(3)
-    ]
+    )
 
     print(f"  Host A: {host_a.get_id()}")
     print(f"  Host B: {host_b.get_id()}")
     print(f"  Host C: {host_c.get_id()}")
-
 
     # Start all hosts
     addr_a = [multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{BASE_PORT}")]
@@ -126,12 +123,11 @@ async def run_demo() -> None:
 
     print("  PART 3: Connection Limits (max_connections=1)")
 
-
     # Create Host A and B (normal)
-    host_a, host_b = [
+    host_a, host_b = (
         new_host(key_pair=create_new_key_pair(secrets.token_bytes(32)))
         for _ in range(2)
-    ]
+    )
 
     # Create Host D with max_connections=1
     resource_mgr = new_resource_manager(limits=ResourceLimits(max_connections=1))
@@ -185,6 +181,7 @@ async def run_demo() -> None:
             print("✅ Connected (slot freed)")
         except Exception as e:
             print(f"❌ Failed: {e}")
+
 
 if __name__ == "__main__":
     trio.run(run_demo)
