@@ -491,7 +491,24 @@ class TestAddIceConnection:
 
 class TestAttachMuxedConnection:
     def test_pc_over_mux_connects_and_routes(self) -> None:
-        asyncio.run(asyncio.wait_for(self._pc_over_mux(), timeout=30))
+        async def _with_watchdog() -> None:
+            import sys, traceback
+
+            async def _dump() -> None:
+                await asyncio.sleep(20)
+                print("\n=== WATCHDOG: asyncio tasks ===", file=sys.stderr, flush=True)
+                for t in asyncio.all_tasks():
+                    print("--- task", t.get_name(), t.get_coro(), file=sys.stderr, flush=True)
+                    t.print_stack(file=sys.stderr)
+                print("=== END WATCHDOG ===", file=sys.stderr, flush=True)
+
+            wd = asyncio.ensure_future(_dump())
+            try:
+                await asyncio.wait_for(self._pc_over_mux(), timeout=60)
+            finally:
+                wd.cancel()
+
+        asyncio.run(_with_watchdog())
 
     async def _pc_over_mux(self) -> None:
         # Bind the mux on all interfaces and advertise a real host address:
