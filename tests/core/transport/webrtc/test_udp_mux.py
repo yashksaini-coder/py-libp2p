@@ -509,6 +509,16 @@ class TestAttachMuxedConnection:
                             print(f"    awaiting {type(c).__name__}: {c!r}"[:300], file=sys.stderr, flush=True)
                         c = getattr(c, "cr_await", None) or getattr(c, "gi_yieldfrom", None) or getattr(c, "ag_await", None)
                         depth += 1
+                conn = getattr(self, "_dbg_conn", None)
+                if conn is not None:
+                    loop = asyncio.get_running_loop()
+                    print("running loop", id(loop), type(loop).__name__, file=sys.stderr, flush=True)
+                    for pr in conn._protocols:
+                        fut = pr._StunProtocol__closed
+                        print("proto", pr, "closed.done", fut.done(), "fut.loop", id(fut.get_loop()),
+                              "transport", pr.transport, "mt.protocol is pr", getattr(pr.transport, "_protocol", None) is pr,
+                              file=sys.stderr, flush=True)
+                    print("conn._protocols", conn._protocols, "consent", conn._query_consent_task, file=sys.stderr, flush=True)
                 print("=== END WATCHDOG ===", file=sys.stderr, flush=True)
 
             wd = asyncio.ensure_future(_dump())
@@ -548,6 +558,7 @@ class TestAttachMuxedConnection:
         pc_s = pc_c = None
         try:
             conn = mux.add_ice_connection(ufrag, pwd, host=cand_host)
+            self._dbg_conn = conn
             pc_s = await create_peer_connection(cert_s._rtc_certificate, ice_servers=[])
             ch_s = await create_noise_channel(pc_s)
             attach_muxed_connection(pc_s, mux, conn)
