@@ -499,7 +499,16 @@ class TestAttachMuxedConnection:
                 print("\n=== WATCHDOG: asyncio tasks ===", file=sys.stderr, flush=True)
                 for t in asyncio.all_tasks():
                     print("--- task", t.get_name(), t.get_coro(), file=sys.stderr, flush=True)
-                    t.print_stack(file=sys.stderr)
+                    c = t.get_coro()
+                    depth = 0
+                    while c is not None and depth < 40:
+                        fr = getattr(c, "cr_frame", None) or getattr(c, "gi_frame", None)
+                        if fr is not None:
+                            print(f"    {fr.f_code.co_filename}:{fr.f_lineno} {fr.f_code.co_name}", file=sys.stderr, flush=True)
+                        else:
+                            print(f"    awaiting {type(c).__name__}: {c!r}"[:300], file=sys.stderr, flush=True)
+                        c = getattr(c, "cr_await", None) or getattr(c, "gi_yieldfrom", None) or getattr(c, "ag_await", None)
+                        depth += 1
                 print("=== END WATCHDOG ===", file=sys.stderr, flush=True)
 
             wd = asyncio.ensure_future(_dump())
