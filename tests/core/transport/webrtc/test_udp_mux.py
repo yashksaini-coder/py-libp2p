@@ -579,8 +579,8 @@ class TestAttachMuxedConnection:
             attach_muxed_connection(pc_s, mux, conn)
 
             pc_c = await create_peer_connection(cert_c._rtc_certificate, ice_servers=[])
-            self._dbg_client_conn = pc_c.sctp.transport.transport._connection
             ch_c = await create_noise_channel(pc_c)
+            self._dbg_client_conn = pc_c.sctp.transport.transport._connection
 
             offer = await pc_c.createOffer()
             await pc_c.setLocalDescription(offer)
