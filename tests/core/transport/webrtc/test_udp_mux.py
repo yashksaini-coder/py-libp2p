@@ -509,6 +509,21 @@ class TestAttachMuxedConnection:
                             print(f"    awaiting {type(c).__name__}: {c!r}"[:300], file=sys.stderr, flush=True)
                         c = getattr(c, "cr_await", None) or getattr(c, "gi_yieldfrom", None) or getattr(c, "ag_await", None)
                         depth += 1
+                cconn = getattr(self, "_dbg_client_conn", None)
+                if cconn is not None:
+                    for pr in cconn._protocols:
+                        tr = pr.transport
+                        fut = pr._StunProtocol__closed
+                        print(
+                            "cli proto", pr.id, "closed.done", fut.done(),
+                            "tr", type(tr).__name__,
+                            "closing", getattr(tr, "_closing", "?"),
+                            "conn_lost", getattr(tr, "_conn_lost", "?"),
+                            "write_fut", getattr(tr, "_write_fut", "?"),
+                            "read_fut", getattr(tr, "_read_fut", "?"),
+                            "buffer", len(getattr(tr, "_buffer", b"") or b""),
+                            file=sys.stderr, flush=True,
+                        )
                 conn = getattr(self, "_dbg_conn", None)
                 if conn is not None:
                     loop = asyncio.get_running_loop()
@@ -564,6 +579,7 @@ class TestAttachMuxedConnection:
             attach_muxed_connection(pc_s, mux, conn)
 
             pc_c = await create_peer_connection(cert_c._rtc_certificate, ice_servers=[])
+            self._dbg_client_conn = pc_c.sctp.transport.transport._connection
             ch_c = await create_noise_channel(pc_c)
 
             offer = await pc_c.createOffer()
